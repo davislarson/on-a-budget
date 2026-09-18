@@ -54,7 +54,12 @@ export function TransactionButtons({
           {isTransfer ? "Not transfer" : "Mark transfer"}
         </button>
       </form>
-      <form action={deleteTransaction}>
+      <form
+        action={deleteTransaction}
+        onSubmit={(event) => {
+          if (!confirm("Delete this transaction? This can't be undone.")) event.preventDefault();
+        }}
+      >
         <input type="hidden" name="id" value={id} />
         <button className="btn btn-danger px-2 py-1 text-xs" type="submit">
           Delete
