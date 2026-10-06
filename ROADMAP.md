@@ -27,13 +27,14 @@ _Last updated: 2026-10-05_
   "Uncategorized"), in/out totals, add form, inline category changes, mark as transfer,
   delete with confirmation.
 - **Accounts (`/accounts`)** — add, edit, delete; per-account balances and net worth.
+- **Budget (`/budget`)** — manage spending and income categories and their monthly caps.
 - **Import (`/import`)** — CSV upload with column matching, preview, duplicate skipping,
   remembered mappings, and import history with undo.
 - **Nav and layout** wired up; global CSS moved into layers so Tailwind utilities work.
 
 ### Not built yet
 
-The nav links to **Budget** and **Trends**, but those pages 404.
+The nav links to **Trends**, but that page 404s.
 
 ### Merged
 
@@ -97,15 +98,19 @@ The nav links to **Budget** and **Trends**, but those pages 404.
   checked today).
 - [ ] Other formats banks offer: OFX / QFX / QIF.
 
-## Phase 4 — Budget page (`/budget`)
+## Phase 4 — Budget page (`/budget`) ✅
 
-- [ ] List expense categories with their monthly caps; edit caps inline
-  (`updateCategoryCap`).
-- [ ] Add a category (`createCategory`) and archive one (`archiveCategory`).
-- [ ] Show total budgeted vs. typical monthly income, so over-allocation is obvious.
-- [ ] Reorder categories (`sort_order` exists; needs an action).
-- [ ] Rename a category (needs an action).
-- [ ] Un-archive / view archived categories.
+- [x] Spending categories with their monthly caps and recent average spending; edit name
+  and cap inline; clear a cap to remove it.
+- [x] Income categories.
+- [x] Add, rename, reorder (↑ / ↓), archive, and restore categories.
+- [x] Totals: budgeted per month, typical income (average of the last complete months with
+  activity), and how much is left unbudgeted or over-budgeted.
+- [ ] Transactions in an archived category: the dashboard counts them in total spending but
+  shows no row for them, and the transactions table's category dropdown shows them as
+  "Uncategorized". Show archived categories that still have activity.
+- [ ] Permanently delete a category that has no transactions.
+- [ ] Drag-and-drop reordering.
 
 ## Phase 5 — Trends page (`/trends`)
 
@@ -203,7 +208,7 @@ Once real CSVs are flowing in, categorizing every transaction by hand gets tedio
 
 1. ~~Phase 0 + Phase 1 (bugs)~~ — done.
 2. ~~Phase 2 Accounts → Phase 3 Import~~ — done; the app is usable with real bank data.
-3. Phase 4 Budget → Phase 5 Trends — every nav link works.
+3. ~~Phase 4 Budget~~ (done) → Phase 5 Trends — every nav link works.
 4. Phase 6 — categorizing becomes quick enough to keep up with monthly.
 5. Phases 9–10 (backups, tests, CI) — before trusting it with years of history.
 6. Phases 7–8 and "Later" as wanted.
