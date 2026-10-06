@@ -1,6 +1,6 @@
 import { and, asc, count, desc, eq, gte, isNotNull, isNull, lte, sum } from "drizzle-orm";
 import { db } from "@/db";
-import { accounts, categories, transactions, type Account } from "@/db/schema";
+import { accounts, categories, importBatches, transactions, type Account } from "@/db/schema";
 import { lastNMonths, monthBounds } from "@/lib/dates";
 
 export function listAccounts() {
@@ -229,4 +229,57 @@ export function existingHashes(accountId: number) {
     .where(and(eq(transactions.accountId, accountId), isNotNull(transactions.importHash)))
     .all();
   return new Set(rows.map((row) => row.importHash).filter((hash): hash is string => Boolean(hash)));
+}
+
+export type ImportHistoryRow = {
+  id: number;
+  filename: string;
+  createdAt: string;
+  accountName: string | null;
+  rowCount: number;
+  importedCount: number;
+  skippedCount: number;
+  // Imported transactions that haven't since been deleted individually.
+  remainingCount: number;
+};
+
+export function listImportHistory(limit = 25): ImportHistoryRow[] {
+  const remaining = db
+    .select({ batchId: transactions.importBatchId, count: count() })
+    .from(transactions)
+    .where(isNotNull(transactions.importBatchId))
+    .groupBy(transactions.importBatchId)
+    .all();
+  const remainingByBatch = new Map(remaining.map((row) => [row.batchId, row.count]));
+  return db
+    .select({
+      id: importBatches.id,
+      filename: importBatches.filename,
+      createdAt: importBatches.createdAt,
+      accountName: accounts.name,
+      rowCount: importBatches.rowCount,
+      importedCount: importBatches.importedCount,
+      skippedCount: importBatches.skippedCount,
+    })
+    .from(importBatches)
+    .leftJoin(accounts, eq(importBatches.accountId, accounts.id))
+    .orderBy(desc(importBatches.id))
+    .limit(limit)
+    .all()
+    .map((row) => ({ ...row, remainingCount: remainingByBatch.get(row.id) ?? 0 }));
+}
+
+// The column mapping used by each account's most recent import, as stored JSON.
+export function lastMappingByAccount(): Record<number, string> {
+  const rows = db
+    .select({ accountId: importBatches.accountId, mappedColumns: importBatches.mappedColumns })
+    .from(importBatches)
+    .where(isNotNull(importBatches.accountId))
+    .orderBy(asc(importBatches.id))
+    .all();
+  const result: Record<number, string> = {};
+  for (const row of rows) {
+    if (row.accountId !== null) result[row.accountId] = row.mappedColumns;
+  }
+  return result;
 }
