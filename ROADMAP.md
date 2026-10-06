@@ -4,7 +4,7 @@ A local-first personal budgeting app. Next.js 16 (App Router) + Tailwind 4, with
 local SQLite file (`data/budget.sqlite`) accessed through Drizzle. Everything runs on your
 own machine; no financial data leaves it or gets committed.
 
-_Last updated: 2026-09-18_
+_Last updated: 2026-10-05_
 
 ---
 
@@ -32,41 +32,36 @@ _Last updated: 2026-09-18_
 
 The nav links to **Budget**, **Accounts**, **Import**, and **Trends**, but those pages 404.
 
-### Open PR
+### Merged
 
-[#1 Feature/initial app](https://github.com/davislarson/on-a-budget/pull/1) — everything
-above, on `feature/initial-app`. Not merged yet.
+[#1](https://github.com/davislarson/on-a-budget/pull/1) — everything above.
 
 ---
 
-## Phase 0 — Housekeeping (short)
+## Phase 0 — Housekeeping ✅
 
-- [ ] Sign in the GitHub CLI (`gh auth login`) so PRs and CI can be managed from Claude Code.
-- [ ] Give PR #1 a real title/description and merge it into `main`.
+- [x] Sign in the GitHub CLI (`gh auth login`) so PRs and CI can be managed from Claude Code.
+- [x] Give PR #1 a real title/description and merge it into `main`.
 - [ ] Work on short-lived branches per phase from here on (e.g. `feature/accounts-page`).
 
-## Phase 1 — Fix known bugs in existing code
+## Phase 1 — Fix known bugs in existing code ✅
 
-These are in code that's already written, but aren't visible yet because the pages that call
-them don't exist. Fix them before (or while) building those pages.
-
-- [ ] **CSV import crashes on identical rows in one file.** Two genuinely separate
-  transactions with the same date, amount, and description (e.g. two $5.00 coffees on the
-  same day) get the same `importHash`. `importCsvRows` only de-duplicates against rows
-  already in the database, not within the file, so both are inserted and the unique index
-  on `(account_id, import_hash)` throws — the whole import fails.
-  _Fix:_ add an occurrence counter to the hash for repeats within a file (1st, 2nd, …) so
-  re-importing the same file still de-duplicates but same-day repeats are kept.
-- [ ] **Can't remove a category's cap.** `updateCategoryCap` saves an empty input as `0`
-  instead of `null`, so a cleared cap shows as "$0.00 budgeted" and every dollar spent is
-  over budget. _Fix:_ empty → `null`.
-- [ ] **Errors crash the page.** Server actions `throw` on bad input (invalid amount, deleting
-  an account that has transactions, etc.) and there's no error UI, so the user sees Next's
-  error screen. _Fix:_ return `{ error }` from actions and show it inline with
-  `useActionState`; add an `error.tsx` boundary as a fallback.
-- [ ] **Input validation.** Actions trust `Number(formData.get("id"))` and category/account
-  IDs without checking they exist. Validate IDs, dates, and enum values (a small schema
-  library such as Zod, or hand-written guards).
+- [x] **CSV import crashed on identical rows in one file.** Two separate transactions with
+  the same date, amount, and description (e.g. two $5.00 coffees on one day) got the same
+  `importHash` and tripped the unique index. Repeats within a file are now numbered, so both
+  are kept and re-importing the same file still de-duplicates.
+- [x] **Large imports.** Rows are inserted in chunks (a few thousand rows in one statement
+  exceeded SQLite's limits), the batch record and its rows are saved atomically, and files
+  over 50,000 rows are rejected with a message.
+- [x] **Couldn't remove a category's cap.** Clearing the cap now saves "no cap" rather than
+  $0.00.
+- [x] **Errors crashed the page.** Actions that can fail on user input return
+  `{ error, values }` and forms show the message inline via `useActionState`
+  (see [transaction-form.tsx](src/components/transaction-form.tsx) for the pattern);
+  [error.tsx](src/app/error.tsx) catches anything unexpected.
+- [x] **Input validation.** IDs, dates, amounts, and enum values are checked; amounts like
+  `12abc` are rejected instead of being read as 12; a category must match the transaction
+  type; duplicate category names are refused.
 
 ## Phase 2 — Accounts page (`/accounts`)
 
@@ -206,7 +201,7 @@ Once real CSVs are flowing in, categorizing every transaction by hand gets tedio
 
 ## Suggested order
 
-1. Phase 0 + Phase 1 (bugs) — small, and prevents confusing failures later.
+1. ~~Phase 0 + Phase 1 (bugs)~~ — done.
 2. Phase 2 Accounts → Phase 3 Import — the app becomes usable with real bank data.
 3. Phase 4 Budget → Phase 5 Trends — every nav link works.
 4. Phase 6 — categorizing becomes quick enough to keep up with monthly.

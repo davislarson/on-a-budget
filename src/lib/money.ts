@@ -8,10 +8,10 @@ export function dollarsToCents(value: string | number): number {
   }
   const negative = cleaned.startsWith("(") && cleaned.endsWith(")");
   const numeric = negative ? cleaned.slice(1, -1) : cleaned;
-  const amount = Number.parseFloat(numeric);
-  if (!Number.isFinite(amount)) {
+  if (!/^[-+]?(\d+\.?\d*|\.\d+)$/.test(numeric)) {
     throw new Error("Invalid amount");
   }
+  const amount = Number.parseFloat(numeric);
   const cents = Math.round(amount * 100);
   return negative ? -cents : cents;
 }

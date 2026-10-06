@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, inArray, isNull, lte } from "drizzle-orm";
+import { and, asc, desc, eq, gte, isNotNull, isNull, lte } from "drizzle-orm";
 import { db } from "@/db";
 import { accounts, categories, transactions } from "@/db/schema";
 import { lastNMonths, monthBounds } from "@/lib/dates";
@@ -196,12 +196,11 @@ export function trends(endMonth: string, months = 12) {
   return { monthKeys, byMonth, expenseCategories };
 }
 
-export function existingHashes(accountId: number, hashes: string[]) {
-  if (hashes.length === 0) return new Set<string>();
+export function existingHashes(accountId: number) {
   const rows = db
     .select({ importHash: transactions.importHash })
     .from(transactions)
-    .where(and(eq(transactions.accountId, accountId), inArray(transactions.importHash, hashes)))
+    .where(and(eq(transactions.accountId, accountId), isNotNull(transactions.importHash)))
     .all();
   return new Set(rows.map((row) => row.importHash).filter((hash): hash is string => Boolean(hash)));
 }

@@ -1,13 +1,17 @@
 "use server";
 
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/db";
-import { accounts, categories, importBatches, transactions } from "@/db/schema";
+import { accountTypes, accounts, categories, categoryKinds, importBatches, transactions } from "@/db/schema";
+import type { ActionState } from "@/lib/action-state";
 import { importHash } from "@/lib/hash";
-import { dollarsToCents, tryDollarsToCents } from "@/lib/money";
-import { parseFlexibleDate, todayIso } from "@/lib/dates";
+import { tryDollarsToCents } from "@/lib/money";
+import { isValidIsoDate, parseFlexibleDate, todayIso } from "@/lib/dates";
 import { existingHashes } from "@/lib/queries";
+
+const MAX_IMPORT_ROWS = 50_000;
+const INSERT_CHUNK = 500;
 
 function revalidateAll() {
   revalidatePath("/", "layout");
@@ -17,14 +21,41 @@ function formString(formData: FormData, key: string) {
   return String(formData.get(key) ?? "").trim();
 }
 
-export async function createAccount(formData: FormData) {
-  const name = formString(formData, "name");
-  const type = formString(formData, "type") as "checking" | "savings" | "credit";
-  const institution = formString(formData, "institution") || null;
-  if (!name) throw new Error("Account name is required");
-  if (!["checking", "savings", "credit"].includes(type)) {
-    throw new Error("Invalid account type");
+function formValues(formData: FormData) {
+  const values: Record<string, string> = {};
+  for (const [key, value] of formData.entries()) {
+    if (typeof value === "string" && !key.startsWith("$")) values[key] = value;
   }
+  return values;
+}
+
+function fail(formData: FormData, error: string): ActionState {
+  return { error, values: formValues(formData) };
+}
+
+function parseId(value: FormDataEntryValue | null): number | null {
+  const id = Number(value);
+  return Number.isInteger(id) && id > 0 ? id : null;
+}
+
+function isOneOf<T extends string>(options: readonly T[], value: string): value is T {
+  return (options as readonly string[]).includes(value);
+}
+
+function findAccount(id: number) {
+  return db.select().from(accounts).where(eq(accounts.id, id)).get();
+}
+
+function findCategory(id: number) {
+  return db.select().from(categories).where(eq(categories.id, id)).get();
+}
+
+export async function createAccount(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const name = formString(formData, "name");
+  const type = formString(formData, "type");
+  const institution = formString(formData, "institution") || null;
+  if (!name) return fail(formData, "Account name is required.");
+  if (!isOneOf(accountTypes, type)) return fail(formData, "Pick an account type.");
   db.insert(accounts)
     .values({
       name,
@@ -35,82 +66,123 @@ export async function createAccount(formData: FormData) {
     })
     .run();
   revalidateAll();
+  return {};
 }
 
-export async function updateAccount(formData: FormData) {
-  const id = Number(formData.get("id"));
+export async function updateAccount(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const id = parseId(formData.get("id"));
   const name = formString(formData, "name");
-  const type = formString(formData, "type") as "checking" | "savings" | "credit";
+  const type = formString(formData, "type");
   const institution = formString(formData, "institution") || null;
-  if (!id || !name) throw new Error("Account is required");
+  if (!id || !findAccount(id)) return fail(formData, "That account no longer exists.");
+  if (!name) return fail(formData, "Account name is required.");
+  if (!isOneOf(accountTypes, type)) return fail(formData, "Pick an account type.");
   db.update(accounts)
     .set({ name, type, institution })
     .where(eq(accounts.id, id))
     .run();
   revalidateAll();
+  return {};
 }
 
-export async function deleteAccount(formData: FormData) {
-  const id = Number(formData.get("id"));
+export async function deleteAccount(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const id = parseId(formData.get("id"));
+  if (!id || !findAccount(id)) return fail(formData, "That account no longer exists.");
   const tx = db.select({ id: transactions.id }).from(transactions).where(eq(transactions.accountId, id)).get();
   if (tx) {
-    throw new Error("Cannot delete an account that still has transactions");
+    return fail(formData, "This account still has transactions. Delete or move them first.");
   }
   db.delete(accounts).where(eq(accounts.id, id)).run();
   revalidateAll();
+  return {};
 }
 
-export async function createCategory(formData: FormData) {
+// Empty input means "no cap"; returns undefined when the input isn't a valid amount.
+function parseCap(raw: string): number | null | undefined {
+  if (raw === "") return null;
+  const cents = tryDollarsToCents(raw);
+  if (cents === null || cents < 0) return undefined;
+  return cents;
+}
+
+export async function createCategory(_prev: ActionState, formData: FormData): Promise<ActionState> {
   const name = formString(formData, "name");
-  const kind = formString(formData, "kind") as "income" | "expense";
-  const capRaw = formString(formData, "monthlyCap");
-  if (!name) throw new Error("Category name is required");
-  const monthlyCapCents =
-    kind === "expense" && capRaw ? dollarsToCents(capRaw) : null;
+  const kind = formString(formData, "kind");
+  if (!name) return fail(formData, "Category name is required.");
+  if (!isOneOf(categoryKinds, kind)) return fail(formData, "Pick income or expense.");
+  const duplicate = db
+    .select({ name: categories.name })
+    .from(categories)
+    .where(and(eq(categories.kind, kind), eq(categories.archived, false)))
+    .all()
+    .some((cat) => cat.name.toLowerCase() === name.toLowerCase());
+  if (duplicate) return fail(formData, `You already have a category called "${name}".`);
+  const cap = kind === "expense" ? parseCap(formString(formData, "monthlyCap")) : null;
+  if (cap === undefined) return fail(formData, "Enter the monthly cap as a dollar amount, like 250 or 250.00.");
   db.insert(categories)
     .values({
       name,
       kind,
-      monthlyCapCents,
+      monthlyCapCents: cap,
       sortOrder: kind === "income" ? 50 : 100,
       archived: false,
     })
     .run();
   revalidateAll();
+  return {};
 }
 
-export async function updateCategoryCap(formData: FormData) {
-  const id = Number(formData.get("id"));
-  const capRaw = formString(formData, "monthlyCap");
-  const monthlyCapCents = capRaw === "" ? 0 : dollarsToCents(capRaw);
-  db.update(categories).set({ monthlyCapCents }).where(eq(categories.id, id)).run();
+export async function updateCategoryCap(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const id = parseId(formData.get("id"));
+  const category = id ? findCategory(id) : undefined;
+  if (!id || !category) return fail(formData, "That category no longer exists.");
+  if (category.kind !== "expense") return fail(formData, "Only expense categories have caps.");
+  const cap = parseCap(formString(formData, "monthlyCap"));
+  if (cap === undefined) return fail(formData, "Enter the monthly cap as a dollar amount, like 250 or 250.00.");
+  db.update(categories).set({ monthlyCapCents: cap }).where(eq(categories.id, id)).run();
   revalidateAll();
+  return {};
 }
 
 export async function archiveCategory(formData: FormData) {
-  const id = Number(formData.get("id"));
+  const id = parseId(formData.get("id"));
+  if (!id) return;
   db.update(categories).set({ archived: true }).where(eq(categories.id, id)).run();
   revalidateAll();
 }
 
-export async function createTransaction(formData: FormData) {
-  const accountId = Number(formData.get("accountId"));
+export async function createTransaction(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const accountId = parseId(formData.get("accountId"));
   const date = formString(formData, "date") || todayIso();
   const type = formString(formData, "type");
-  const amountRaw = formString(formData, "amount");
   const payee = formString(formData, "payee");
   const rawDescription = formString(formData, "rawDescription");
   const categoryRaw = formString(formData, "categoryId");
-  if (!accountId) throw new Error("Pick an account");
-  const absCents = dollarsToCents(amountRaw);
+
+  if (!accountId || !findAccount(accountId)) return fail(formData, "Pick an account.");
+  if (!isOneOf(["expense", "income", "transfer"] as const, type)) return fail(formData, "Pick a transaction type.");
+  if (!isValidIsoDate(date)) return fail(formData, "Enter a valid date.");
+  const absCents = tryDollarsToCents(formString(formData, "amount"));
+  if (absCents === null || absCents === 0) {
+    return fail(formData, "Enter the amount as a dollar figure, like 12.50.");
+  }
+
   const isTransfer = type === "transfer";
+  let categoryId: number | null = null;
+  if (!isTransfer && categoryRaw) {
+    categoryId = parseId(categoryRaw);
+    const category = categoryId ? findCategory(categoryId) : undefined;
+    if (!category || category.archived) return fail(formData, "That category no longer exists.");
+    if (category.kind !== type) {
+      return fail(formData, `"${category.name}" is an ${category.kind} category. Pick one that matches the type.`);
+    }
+  }
   const amountCents = type === "income" ? Math.abs(absCents) : -Math.abs(absCents);
-  const categoryId = categoryRaw ? Number(categoryRaw) : null;
 
   db.insert(transactions)
     .values({
       accountId,
-      categoryId: isTransfer ? null : categoryId,
+      categoryId,
       date,
       amountCents,
       payee,
@@ -120,18 +192,22 @@ export async function createTransaction(formData: FormData) {
     })
     .run();
   revalidateAll();
+  return {};
 }
 
 export async function updateTransactionCategory(formData: FormData) {
-  const id = Number(formData.get("id"));
+  const id = parseId(formData.get("id"));
+  if (!id) return;
   const categoryRaw = formString(formData, "categoryId");
-  const categoryId = categoryRaw ? Number(categoryRaw) : null;
+  const categoryId = categoryRaw ? parseId(categoryRaw) : null;
+  if (categoryRaw && (!categoryId || !findCategory(categoryId))) return;
   db.update(transactions).set({ categoryId }).where(eq(transactions.id, id)).run();
   revalidateAll();
 }
 
 export async function toggleTransfer(formData: FormData) {
-  const id = Number(formData.get("id"));
+  const id = parseId(formData.get("id"));
+  if (!id) return;
   const current = db.select().from(transactions).where(eq(transactions.id, id)).get();
   if (!current) return;
   db.update(transactions)
@@ -145,7 +221,8 @@ export async function toggleTransfer(formData: FormData) {
 }
 
 export async function deleteTransaction(formData: FormData) {
-  const id = Number(formData.get("id"));
+  const id = parseId(formData.get("id"));
+  if (!id) return;
   db.delete(transactions).where(eq(transactions.id, id)).run();
   revalidateAll();
 }
@@ -157,15 +234,26 @@ export type ImportRowInput = {
   description?: string;
 };
 
+export type ImportResult =
+  | { error: string }
+  | { error?: undefined; imported: number; skipped: number; parsed: number };
+
 export async function importCsvRows(input: {
   accountId: number;
   filename: string;
   mapping: Record<string, string>;
   invertAmounts: boolean;
   rows: ImportRowInput[];
-}) {
-  const found = db.select().from(accounts).where(eq(accounts.id, input.accountId)).get();
-  if (!found) throw new Error("Account not found");
+}): Promise<ImportResult> {
+  if (!Number.isInteger(input.accountId) || !findAccount(input.accountId)) {
+    return { error: "That account no longer exists." };
+  }
+  if (!Array.isArray(input.rows) || input.rows.length === 0) {
+    return { error: "The file has no rows to import." };
+  }
+  if (input.rows.length > MAX_IMPORT_ROWS) {
+    return { error: `That file has more than ${MAX_IMPORT_ROWS.toLocaleString("en-US")} rows. Split it into smaller files.` };
+  }
 
   const prepared: Array<{
     date: string;
@@ -174,61 +262,71 @@ export async function importCsvRows(input: {
     rawDescription: string;
     hash: string;
   }> = [];
+  const seen = new Map<string, number>();
 
   for (const row of input.rows) {
-    const date = parseFlexibleDate(row.date);
+    const date = parseFlexibleDate(String(row.date ?? ""));
     const parsed = tryDollarsToCents(row.amount);
-    if (!date || parsed === null || parsed === 0) continue;
+    if (!date || !isValidIsoDate(date) || parsed === null || parsed === 0) continue;
     let amountCents = parsed;
     if (input.invertAmounts) amountCents = -amountCents;
-    const rawDescription = (row.description ?? "").trim();
-    const payee = (row.payee ?? "").trim() || rawDescription.slice(0, 80);
-    const hash = importHash({
+    const rawDescription = String(row.description ?? "").trim();
+    const payee = String(row.payee ?? "").trim() || rawDescription.slice(0, 80);
+    const details = {
       accountId: input.accountId,
       date,
       amountCents,
       description: rawDescription || payee,
-    });
+    };
+    // Two identical rows in one file are separate transactions (e.g. two coffees
+    // on the same day), so number the repeats rather than collapsing them.
+    const baseHash = importHash(details);
+    const occurrence = seen.get(baseHash) ?? 0;
+    seen.set(baseHash, occurrence + 1);
+    const hash = occurrence === 0 ? baseHash : importHash({ ...details, occurrence });
     prepared.push({ date, amountCents, payee, rawDescription, hash });
   }
 
-  const hashes = prepared.map((row) => row.hash);
-  const existing = existingHashes(input.accountId, hashes);
+  const existing = existingHashes(input.accountId);
   const unique = prepared.filter((row) => !existing.has(row.hash));
-  const skipped = prepared.length - unique.length + (input.rows.length - prepared.length);
+  const skipped = input.rows.length - unique.length;
 
-  const batch = db
-    .insert(importBatches)
-    .values({
-      filename: input.filename,
-      mappedColumns: JSON.stringify(input.mapping),
-      rowCount: input.rows.length,
-      importedCount: unique.length,
-      skippedCount: skipped,
-      createdAt: new Date().toISOString(),
-    })
-    .returning({ id: importBatches.id })
-    .get();
+  db.transaction((tx) => {
+    const batch = tx
+      .insert(importBatches)
+      .values({
+        filename: String(input.filename).slice(0, 255),
+        mappedColumns: JSON.stringify(input.mapping ?? {}),
+        rowCount: input.rows.length,
+        importedCount: unique.length,
+        skippedCount: skipped,
+        createdAt: new Date().toISOString(),
+      })
+      .returning({ id: importBatches.id })
+      .get();
 
-  if (unique.length > 0) {
-    db.insert(transactions)
-      .values(
-        unique.map((row) => ({
-          accountId: input.accountId,
-          date: row.date,
-          amountCents: row.amountCents,
-          payee: row.payee,
-          rawDescription: row.rawDescription,
-          source: "csv" as const,
-          importHash: row.hash,
-          isTransfer: false,
-          importBatchId: batch?.id,
-        })),
-      )
-      .run();
+    for (let i = 0; i < unique.length; i += INSERT_CHUNK) {
+      tx.insert(transactions)
+        .values(
+          unique.slice(i, i + INSERT_CHUNK).map((row) => ({
+            accountId: input.accountId,
+            date: row.date,
+            amountCents: row.amountCents,
+            payee: row.payee,
+            rawDescription: row.rawDescription,
+            source: "csv" as const,
+            importHash: row.hash,
+            isTransfer: false,
+            importBatchId: batch.id,
+          })),
+        )
+        .run();
+    }
 
-    db.update(accounts).set({ source: "csv" }).where(eq(accounts.id, input.accountId)).run();
-  }
+    if (unique.length > 0) {
+      tx.update(accounts).set({ source: "csv" }).where(eq(accounts.id, input.accountId)).run();
+    }
+  });
 
   revalidateAll();
   return {
@@ -237,4 +335,3 @@ export async function importCsvRows(input: {
     parsed: prepared.length,
   };
 }
-
