@@ -27,11 +27,13 @@ _Last updated: 2026-10-05_
   "Uncategorized"), in/out totals, add form, inline category changes, mark as transfer,
   delete with confirmation.
 - **Accounts (`/accounts`)** — add, edit, delete; per-account balances and net worth.
+- **Import (`/import`)** — CSV upload with column matching, preview, duplicate skipping,
+  remembered mappings, and import history with undo.
 - **Nav and layout** wired up; global CSS moved into layers so Tailwind utilities work.
 
 ### Not built yet
 
-The nav links to **Budget**, **Import**, and **Trends**, but those pages 404.
+The nav links to **Budget** and **Trends**, but those pages 404.
 
 ### Merged
 
@@ -78,25 +80,22 @@ The nav links to **Budget**, **Import**, and **Trends**, but those pages 404.
   later. Today the starting balance must be the balance before the *earliest* transaction.
 - [ ] Move or bulk-delete an account's transactions so a used account can be removed.
 
-## Phase 3 — Import page (`/import`)
+## Phase 3 — Import page (`/import`) ✅
 
-The main way real data gets in. The server side (`importCsvRows`) is done; this is the UI.
-
-- [ ] Pick an account and upload a bank CSV; parse it in the browser with Papaparse
-  (already installed) so the file never leaves the machine except as parsed rows to the
-  local server.
-- [ ] Column mapping: choose which columns are date, amount (or separate debit/credit
-  columns), payee, and description. Guess sensible defaults from header names.
-- [ ] "Flip signs" option for banks that export spending as positive numbers
-  (`invertAmounts` is already supported).
-- [ ] Preview the first ~20 parsed rows before importing; flag rows that fail to parse.
-- [ ] Show the result: imported / skipped as duplicates / unparseable.
-- [ ] Remember the column mapping per account so the next import is one click
-  (`import_batches.mapped_columns` already stores it).
-- [ ] Import history list, with **undo import** (delete every transaction in a batch —
-  `import_batch_id` makes this easy).
-- [ ] Support separate debit/credit columns (many banks export this way; the current
-  action expects one signed amount column).
+- [x] Pick an account and upload a bank CSV; it's parsed in the browser with Papaparse.
+- [x] Column mapping with defaults guessed from header names; one signed amount column or
+  separate money-out / money-in columns.
+- [x] "Flip the signs" option for banks that export spending as positive numbers, with a
+  warning when most rows look positive.
+- [x] Preview of the first 20 rows; unreadable rows are flagged and counted.
+- [x] Result summary: added / already imported / unreadable, with a link to categorize.
+- [x] The column mapping is remembered per account and reused when the next file has the
+  same columns.
+- [x] Import history with **undo import**.
+- [ ] CSV files without a header row (the first row is currently always treated as headers).
+- [ ] Duplicate detection against manually entered transactions (only earlier imports are
+  checked today).
+- [ ] Other formats banks offer: OFX / QFX / QIF.
 
 ## Phase 4 — Budget page (`/budget`)
 
@@ -203,7 +202,7 @@ Once real CSVs are flowing in, categorizing every transaction by hand gets tedio
 ## Suggested order
 
 1. ~~Phase 0 + Phase 1 (bugs)~~ — done.
-2. ~~Phase 2 Accounts~~ (done) → Phase 3 Import — the app becomes usable with real bank data.
+2. ~~Phase 2 Accounts → Phase 3 Import~~ — done; the app is usable with real bank data.
 3. Phase 4 Budget → Phase 5 Trends — every nav link works.
 4. Phase 6 — categorizing becomes quick enough to keep up with monthly.
 5. Phases 9–10 (backups, tests, CI) — before trusting it with years of history.

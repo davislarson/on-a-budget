@@ -26,6 +26,8 @@ export const categories = sqliteTable("categories", {
 
 export const importBatches = sqliteTable("import_batches", {
   id: integer("id").primaryKey({ autoIncrement: true }),
+  // Nullable only because batches created before this column existed lack it.
+  accountId: integer("account_id").references(() => accounts.id),
   filename: text("filename").notNull(),
   mappedColumns: text("mapped_columns").notNull(),
   rowCount: integer("row_count").notNull().default(0),

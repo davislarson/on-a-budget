@@ -7,7 +7,8 @@ import { accountTypes, accounts, categories, categoryKinds, importBatches, trans
 import type { ActionState } from "@/lib/action-state";
 import { importHash } from "@/lib/hash";
 import { tryDollarsToCents } from "@/lib/money";
-import { isValidIsoDate, parseFlexibleDate, todayIso } from "@/lib/dates";
+import { isValidIsoDate, todayIso } from "@/lib/dates";
+import { readRow, type ImportMapping, type MappedRow, type ReadRow } from "@/lib/import-mapping";
 import { existingHashes } from "@/lib/queries";
 
 const MAX_IMPORT_ROWS = 50_000;
@@ -106,7 +107,11 @@ export async function deleteAccount(_prev: ActionState, formData: FormData): Pro
   if (tx) {
     return fail(formData, "This account still has transactions. Delete or move them first.");
   }
-  db.delete(accounts).where(eq(accounts.id, id)).run();
+  db.transaction((tx) => {
+    // Import history for an account with no transactions left has nothing to undo.
+    tx.delete(importBatches).where(eq(importBatches.accountId, id)).run();
+    tx.delete(accounts).where(eq(accounts.id, id)).run();
+  });
   revalidateAll();
   return {};
 }
@@ -241,23 +246,15 @@ export async function deleteTransaction(formData: FormData) {
   revalidateAll();
 }
 
-export type ImportRowInput = {
-  date: string;
-  amount: string;
-  payee?: string;
-  description?: string;
-};
-
 export type ImportResult =
   | { error: string }
-  | { error?: undefined; imported: number; skipped: number; parsed: number };
+  | { error?: undefined; imported: number; duplicates: number; unreadable: number };
 
 export async function importCsvRows(input: {
   accountId: number;
   filename: string;
-  mapping: Record<string, string>;
-  invertAmounts: boolean;
-  rows: ImportRowInput[];
+  mapping: ImportMapping;
+  rows: MappedRow[];
 }): Promise<ImportResult> {
   if (!Number.isInteger(input.accountId) || !findAccount(input.accountId)) {
     return { error: "That account no longer exists." };
@@ -268,29 +265,27 @@ export async function importCsvRows(input: {
   if (input.rows.length > MAX_IMPORT_ROWS) {
     return { error: `That file has more than ${MAX_IMPORT_ROWS.toLocaleString("en-US")} rows. Split it into smaller files.` };
   }
+  const invert = input.mapping?.amountMode === "single" && input.mapping.invert === true;
 
-  const prepared: Array<{
-    date: string;
-    amountCents: number;
-    payee: string;
-    rawDescription: string;
-    hash: string;
-  }> = [];
+  const prepared: Array<ReadRow & { hash: string }> = [];
   const seen = new Map<string, number>();
 
-  for (const row of input.rows) {
-    const date = parseFlexibleDate(String(row.date ?? ""));
-    const parsed = tryDollarsToCents(row.amount);
-    if (!date || !isValidIsoDate(date) || parsed === null || parsed === 0) continue;
-    let amountCents = parsed;
-    if (input.invertAmounts) amountCents = -amountCents;
-    const rawDescription = String(row.description ?? "").trim();
-    const payee = String(row.payee ?? "").trim() || rawDescription.slice(0, 80);
+  for (const raw of input.rows) {
+    const row = readRow(
+      {
+        date: String(raw?.date ?? ""),
+        amount: String(raw?.amount ?? ""),
+        payee: String(raw?.payee ?? "").trim(),
+        description: String(raw?.description ?? "").trim(),
+      },
+      invert,
+    );
+    if (!row) continue;
     const details = {
       accountId: input.accountId,
-      date,
-      amountCents,
-      description: rawDescription || payee,
+      date: row.date,
+      amountCents: row.amountCents,
+      description: row.description || row.payee,
     };
     // Two identical rows in one file are separate transactions (e.g. two coffees
     // on the same day), so number the repeats rather than collapsing them.
@@ -298,22 +293,27 @@ export async function importCsvRows(input: {
     const occurrence = seen.get(baseHash) ?? 0;
     seen.set(baseHash, occurrence + 1);
     const hash = occurrence === 0 ? baseHash : importHash({ ...details, occurrence });
-    prepared.push({ date, amountCents, payee, rawDescription, hash });
+    prepared.push({ ...row, hash });
   }
 
   const existing = existingHashes(input.accountId);
   const unique = prepared.filter((row) => !existing.has(row.hash));
-  const skipped = input.rows.length - unique.length;
+  const duplicates = prepared.length - unique.length;
+  const unreadable = input.rows.length - prepared.length;
+
+  // Nothing new (e.g. the same file again): leave no entry in the import history.
+  if (unique.length === 0) return { imported: 0, duplicates, unreadable };
 
   db.transaction((tx) => {
     const batch = tx
       .insert(importBatches)
       .values({
+        accountId: input.accountId,
         filename: String(input.filename).slice(0, 255),
         mappedColumns: JSON.stringify(input.mapping ?? {}),
         rowCount: input.rows.length,
         importedCount: unique.length,
-        skippedCount: skipped,
+        skippedCount: duplicates + unreadable,
         createdAt: new Date().toISOString(),
       })
       .returning({ id: importBatches.id })
@@ -327,7 +327,7 @@ export async function importCsvRows(input: {
             date: row.date,
             amountCents: row.amountCents,
             payee: row.payee,
-            rawDescription: row.rawDescription,
+            rawDescription: row.description,
             source: "csv" as const,
             importHash: row.hash,
             isTransfer: false,
@@ -337,15 +337,20 @@ export async function importCsvRows(input: {
         .run();
     }
 
-    if (unique.length > 0) {
-      tx.update(accounts).set({ source: "csv" }).where(eq(accounts.id, input.accountId)).run();
-    }
+    tx.update(accounts).set({ source: "csv" }).where(eq(accounts.id, input.accountId)).run();
   });
 
   revalidateAll();
-  return {
-    imported: unique.length,
-    skipped,
-    parsed: prepared.length,
-  };
+  return { imported: unique.length, duplicates, unreadable };
+}
+
+// Removes the transactions an import added (those still present) and its history entry.
+export async function undoImport(formData: FormData) {
+  const id = parseId(formData.get("id"));
+  if (!id) return;
+  db.transaction((tx) => {
+    tx.delete(transactions).where(eq(transactions.importBatchId, id)).run();
+    tx.delete(importBatches).where(eq(importBatches.id, id)).run();
+  });
+  revalidateAll();
 }

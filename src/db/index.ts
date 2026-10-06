@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS categories (
 
 CREATE TABLE IF NOT EXISTS import_batches (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  account_id INTEGER REFERENCES accounts(id),
   filename TEXT NOT NULL,
   mapped_columns TEXT NOT NULL,
   row_count INTEGER NOT NULL DEFAULT 0,
@@ -65,6 +66,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_transactions_import_hash
 // them to a database that already exists.
 const ADDED_COLUMNS = [
   { table: "accounts", column: "opening_balance_cents", definition: "INTEGER NOT NULL DEFAULT 0" },
+  { table: "import_batches", column: "account_id", definition: "INTEGER REFERENCES accounts(id)" },
 ];
 
 function addMissingColumns(sqlite: Database.Database) {
