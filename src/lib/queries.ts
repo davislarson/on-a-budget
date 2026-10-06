@@ -1,10 +1,36 @@
-import { and, asc, desc, eq, gte, isNotNull, isNull, lte } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, isNotNull, isNull, lte, sum } from "drizzle-orm";
 import { db } from "@/db";
-import { accounts, categories, transactions } from "@/db/schema";
+import { accounts, categories, transactions, type Account } from "@/db/schema";
 import { lastNMonths, monthBounds } from "@/lib/dates";
 
 export function listAccounts() {
   return db.select().from(accounts).orderBy(asc(accounts.name)).all();
+}
+
+export type AccountSummary = Account & {
+  transactionCount: number;
+  balanceCents: number;
+};
+
+export function listAccountSummaries(): AccountSummary[] {
+  const totals = db
+    .select({
+      accountId: transactions.accountId,
+      count: count(),
+      sumCents: sum(transactions.amountCents).mapWith(Number),
+    })
+    .from(transactions)
+    .groupBy(transactions.accountId)
+    .all();
+  const byAccount = new Map(totals.map((row) => [row.accountId, row]));
+  return listAccounts().map((account) => {
+    const total = byAccount.get(account.id);
+    return {
+      ...account,
+      transactionCount: total?.count ?? 0,
+      balanceCents: account.openingBalanceCents + (total?.sumCents ?? 0),
+    };
+  });
 }
 
 export function listCategories(options?: { includeArchived?: boolean }) {

@@ -50,17 +50,29 @@ function findCategory(id: number) {
   return db.select().from(categories).where(eq(categories.id, id)).get();
 }
 
+const OPENING_BALANCE_ERROR =
+  "Enter the starting balance as a dollar amount, like 1500 or -320.50.";
+
+// Empty input means zero; returns undefined when the input isn't a valid amount.
+function parseOpeningBalance(raw: string): number | undefined {
+  if (raw === "") return 0;
+  return tryDollarsToCents(raw) ?? undefined;
+}
+
 export async function createAccount(_prev: ActionState, formData: FormData): Promise<ActionState> {
   const name = formString(formData, "name");
   const type = formString(formData, "type");
   const institution = formString(formData, "institution") || null;
   if (!name) return fail(formData, "Account name is required.");
   if (!isOneOf(accountTypes, type)) return fail(formData, "Pick an account type.");
+  const openingBalanceCents = parseOpeningBalance(formString(formData, "openingBalance"));
+  if (openingBalanceCents === undefined) return fail(formData, OPENING_BALANCE_ERROR);
   db.insert(accounts)
     .values({
       name,
       type,
       institution,
+      openingBalanceCents,
       source: "manual",
       createdAt: new Date().toISOString(),
     })
@@ -77,8 +89,10 @@ export async function updateAccount(_prev: ActionState, formData: FormData): Pro
   if (!id || !findAccount(id)) return fail(formData, "That account no longer exists.");
   if (!name) return fail(formData, "Account name is required.");
   if (!isOneOf(accountTypes, type)) return fail(formData, "Pick an account type.");
+  const openingBalanceCents = parseOpeningBalance(formString(formData, "openingBalance"));
+  if (openingBalanceCents === undefined) return fail(formData, OPENING_BALANCE_ERROR);
   db.update(accounts)
-    .set({ name, type, institution })
+    .set({ name, type, institution, openingBalanceCents })
     .where(eq(accounts.id, id))
     .run();
   revalidateAll();

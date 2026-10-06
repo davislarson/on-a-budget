@@ -41,7 +41,13 @@ export function TransactionForm({
       </label>
       <label className="field">
         <span>Account</span>
-        <select name="accountId" required defaultValue={entered.accountId ?? accounts[0].id}>
+        {/* Selects are keyed so the choice survives the form reset after a failed submit. */}
+        <select
+          key={entered.accountId}
+          name="accountId"
+          required
+          defaultValue={entered.accountId ?? accounts[0].id}
+        >
           {accounts.map((account) => (
             <option key={account.id} value={account.id}>
               {account.name}
@@ -66,7 +72,7 @@ export function TransactionForm({
       ) : (
         <label className="field">
           <span>Category</span>
-          <select name="categoryId" defaultValue={entered.categoryId ?? ""}>
+          <select key={entered.categoryId} name="categoryId" defaultValue={entered.categoryId ?? ""}>
             <option value="">Uncategorized</option>
             {visibleCats.map((cat) => (
               <option key={cat.id} value={cat.id}>
