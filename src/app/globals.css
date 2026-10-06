@@ -9,6 +9,13 @@
   --accent: #1f6f5b;
   --danger: #b42318;
   --ok: #1f6f5b;
+
+  /* Chart colors, validated for contrast and colorblind separation against --card. */
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --viz-negative: #e34948;
+  --viz-grid: #ebe5db;
+  --viz-axis: #cfc7ba;
 }
 
 @theme inline {

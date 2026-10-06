@@ -79,3 +79,10 @@ export function isValidIsoDate(value: string): boolean {
   const date = new Date(year, month - 1, day);
   return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day;
 }
+
+// Compact axis label: "Sep", with the year added on each January and on the first tick.
+export function formatMonthTick(month: string, isFirst = false): string {
+  const [year, monthNum] = month.split("-").map(Number);
+  const name = new Date(year, monthNum - 1, 1).toLocaleDateString("en-US", { month: "short" });
+  return monthNum === 1 || isFirst ? `${name} ’${String(year).slice(2)}` : name;
+}

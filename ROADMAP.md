@@ -28,13 +28,14 @@ _Last updated: 2026-10-05_
   delete with confirmation.
 - **Accounts (`/accounts`)** — add, edit, delete; per-account balances and net worth.
 - **Budget (`/budget`)** — manage spending and income categories and their monthly caps.
+- **Trends (`/trends`)** — income, spending, and per-category charts over 6–24 months.
 - **Import (`/import`)** — CSV upload with column matching, preview, duplicate skipping,
   remembered mappings, and import history with undo.
 - **Nav and layout** wired up; global CSS moved into layers so Tailwind utilities work.
 
 ### Not built yet
 
-The nav links to **Trends**, but that page 404s.
+Every page in the nav now exists. What's left is in Phases 6–10 below.
 
 ### Merged
 
@@ -112,15 +113,19 @@ The nav links to **Trends**, but that page 404s.
 - [ ] Permanently delete a category that has no transactions.
 - [ ] Drag-and-drop reordering.
 
-## Phase 5 — Trends page (`/trends`)
+## Phase 5 — Trends page (`/trends`) ✅
 
-The `trends()` query and Recharts are already in place.
-
-- [ ] Income vs. spending by month, last 12 months (bar or line chart).
-- [ ] Spending by category over time (stacked bars or small multiples).
-- [ ] Savings rate per month ((income − spending) / income).
-- [ ] Pick the ending month and range (6 / 12 / 24 months).
-- [ ] Clicking a month or category jumps to the filtered transactions list.
+- [x] Income vs. spending by month (grouped bars).
+- [x] Left over each month, with overspent months shown below zero.
+- [x] Spending by category over time, one small chart per category with its cap line.
+- [x] Summary: average monthly income, spending, left over, and savings rate over complete
+  months.
+- [x] Range of 6 / 12 / 24 months and a choice of ending month.
+- [x] Clicking a bar opens that month's (or that month-and-category's) transactions.
+- [x] "View as a table" with the same numbers.
+- [ ] Uncategorized spending and archived categories don't get a category chart.
+- [ ] Net worth over time (needs balances by month).
+- [ ] Dark mode palette for the charts, when the app gets dark mode.
 
 ## Phase 6 — Make categorizing fast
 
@@ -208,7 +213,7 @@ Once real CSVs are flowing in, categorizing every transaction by hand gets tedio
 
 1. ~~Phase 0 + Phase 1 (bugs)~~ — done.
 2. ~~Phase 2 Accounts → Phase 3 Import~~ — done; the app is usable with real bank data.
-3. ~~Phase 4 Budget~~ (done) → Phase 5 Trends — every nav link works.
+3. ~~Phase 4 Budget → Phase 5 Trends~~ — done; every nav link works.
 4. Phase 6 — categorizing becomes quick enough to keep up with monthly.
 5. Phases 9–10 (backups, tests, CI) — before trusting it with years of history.
 6. Phases 7–8 and "Later" as wanted.
