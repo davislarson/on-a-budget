@@ -1,6 +1,6 @@
 "use server";
 
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/db";
 import { accountTypes, accounts, categories, categoryKinds, importBatches, transactions } from "@/db/schema";
@@ -116,6 +116,8 @@ export async function deleteAccount(_prev: ActionState, formData: FormData): Pro
   return {};
 }
 
+const CAP_ERROR = "Enter the monthly cap as a dollar amount, like 250 or 250.00.";
+
 // Empty input means "no cap"; returns undefined when the input isn't a valid amount.
 function parseCap(raw: string): number | null | undefined {
   if (raw === "") return null;
@@ -124,26 +126,41 @@ function parseCap(raw: string): number | null | undefined {
   return cents;
 }
 
+function activeCategories(kind: (typeof categoryKinds)[number]) {
+  return db
+    .select()
+    .from(categories)
+    .where(and(eq(categories.kind, kind), eq(categories.archived, false)))
+    .orderBy(asc(categories.sortOrder), asc(categories.name))
+    .all();
+}
+
+function nameTaken(kind: (typeof categoryKinds)[number], name: string, exceptId?: number) {
+  return activeCategories(kind).some(
+    (cat) => cat.id !== exceptId && cat.name.toLowerCase() === name.toLowerCase(),
+  );
+}
+
+// Income sorts ahead of expenses wherever both kinds are listed together.
+function sortBase(kind: (typeof categoryKinds)[number]) {
+  return kind === "income" ? 0 : 1000;
+}
+
 export async function createCategory(_prev: ActionState, formData: FormData): Promise<ActionState> {
   const name = formString(formData, "name");
   const kind = formString(formData, "kind");
   if (!name) return fail(formData, "Category name is required.");
   if (!isOneOf(categoryKinds, kind)) return fail(formData, "Pick income or expense.");
-  const duplicate = db
-    .select({ name: categories.name })
-    .from(categories)
-    .where(and(eq(categories.kind, kind), eq(categories.archived, false)))
-    .all()
-    .some((cat) => cat.name.toLowerCase() === name.toLowerCase());
-  if (duplicate) return fail(formData, `You already have a category called "${name}".`);
+  if (nameTaken(kind, name)) return fail(formData, `You already have a category called "${name}".`);
   const cap = kind === "expense" ? parseCap(formString(formData, "monthlyCap")) : null;
-  if (cap === undefined) return fail(formData, "Enter the monthly cap as a dollar amount, like 250 or 250.00.");
+  if (cap === undefined) return fail(formData, CAP_ERROR);
+  const last = activeCategories(kind).at(-1);
   db.insert(categories)
     .values({
       name,
       kind,
       monthlyCapCents: cap,
-      sortOrder: kind === "income" ? 50 : 100,
+      sortOrder: Math.max(sortBase(kind), last?.sortOrder ?? 0) + 1,
       archived: false,
     })
     .run();
@@ -151,23 +168,65 @@ export async function createCategory(_prev: ActionState, formData: FormData): Pr
   return {};
 }
 
-export async function updateCategoryCap(_prev: ActionState, formData: FormData): Promise<ActionState> {
+export async function updateCategory(_prev: ActionState, formData: FormData): Promise<ActionState> {
   const id = parseId(formData.get("id"));
   const category = id ? findCategory(id) : undefined;
   if (!id || !category) return fail(formData, "That category no longer exists.");
-  if (category.kind !== "expense") return fail(formData, "Only expense categories have caps.");
-  const cap = parseCap(formString(formData, "monthlyCap"));
-  if (cap === undefined) return fail(formData, "Enter the monthly cap as a dollar amount, like 250 or 250.00.");
-  db.update(categories).set({ monthlyCapCents: cap }).where(eq(categories.id, id)).run();
+  const name = formString(formData, "name");
+  if (!name) return fail(formData, "Category name is required.");
+  if (nameTaken(category.kind, name, id)) {
+    return fail(formData, `You already have a category called "${name}".`);
+  }
+  const cap = category.kind === "expense" ? parseCap(formString(formData, "monthlyCap")) : null;
+  if (cap === undefined) return fail(formData, CAP_ERROR);
+  db.update(categories).set({ name, monthlyCapCents: cap }).where(eq(categories.id, id)).run();
   revalidateAll();
   return {};
 }
 
+export async function moveCategory(formData: FormData) {
+  const id = parseId(formData.get("id"));
+  const category = id ? findCategory(id) : undefined;
+  if (!category || category.archived) return;
+  const ordered = activeCategories(category.kind);
+  const from = ordered.findIndex((cat) => cat.id === category.id);
+  const to = formString(formData, "direction") === "up" ? from - 1 : from + 1;
+  if (to < 0 || to >= ordered.length) return;
+  [ordered[from], ordered[to]] = [ordered[to], ordered[from]];
+  // Renumber the whole list: stored orders can tie, so swapping two values isn't enough.
+  db.transaction((tx) => {
+    ordered.forEach((cat, index) => {
+      tx.update(categories)
+        .set({ sortOrder: sortBase(category.kind) + index + 1 })
+        .where(eq(categories.id, cat.id))
+        .run();
+    });
+  });
+  revalidateAll();
+}
+
+// Archiving hides a category from pickers and the budget; its transactions keep it.
 export async function archiveCategory(formData: FormData) {
   const id = parseId(formData.get("id"));
   if (!id) return;
   db.update(categories).set({ archived: true }).where(eq(categories.id, id)).run();
   revalidateAll();
+}
+
+export async function restoreCategory(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const id = parseId(formData.get("id"));
+  const category = id ? findCategory(id) : undefined;
+  if (!id || !category) return fail(formData, "That category no longer exists.");
+  if (nameTaken(category.kind, category.name, id)) {
+    return fail(formData, `You already have an active category called "${category.name}". Rename it first.`);
+  }
+  const last = activeCategories(category.kind).at(-1);
+  db.update(categories)
+    .set({ archived: false, sortOrder: Math.max(sortBase(category.kind), last?.sortOrder ?? 0) + 1 })
+    .where(eq(categories.id, id))
+    .run();
+  revalidateAll();
+  return {};
 }
 
 export async function createTransaction(_prev: ActionState, formData: FormData): Promise<ActionState> {

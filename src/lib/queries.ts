@@ -1,7 +1,7 @@
 import { and, asc, count, desc, eq, gte, isNotNull, isNull, lte, sum } from "drizzle-orm";
 import { db } from "@/db";
 import { accounts, categories, importBatches, transactions, type Account } from "@/db/schema";
-import { lastNMonths, monthBounds } from "@/lib/dates";
+import { currentMonth, lastNMonths, monthBounds, shiftMonth } from "@/lib/dates";
 
 export function listAccounts() {
   return db.select().from(accounts).orderBy(asc(accounts.name)).all();
@@ -282,4 +282,24 @@ export function lastMappingByAccount(): Record<number, string> {
     if (row.accountId !== null) result[row.accountId] = row.mappedColumns;
   }
   return result;
+}
+
+// Averages over the last few complete months that have any activity, to guide cap-setting.
+// Returns null when there's no history to average.
+export function recentAverages(months = 3) {
+  const { byMonth } = trends(shiftMonth(currentMonth(), -1), months);
+  const active = byMonth.filter((month) => month.incomeCents > 0 || month.spendCents > 0);
+  if (active.length === 0) return null;
+  const average = (pick: (month: (typeof active)[number]) => number) =>
+    Math.round(active.reduce((sum, month) => sum + pick(month), 0) / active.length);
+  const spendByCategory: Record<string, number> = {};
+  for (const name of Object.keys(active[0].spendByCategory)) {
+    spendByCategory[name] = average((month) => month.spendByCategory[name] ?? 0);
+  }
+  return {
+    monthCount: active.length,
+    incomeCents: average((month) => month.incomeCents),
+    spendCents: average((month) => month.spendCents),
+    spendByCategory,
+  };
 }
