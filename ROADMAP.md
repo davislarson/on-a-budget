@@ -26,11 +26,12 @@ _Last updated: 2026-10-05_
 - **Transactions (`/transactions`)** — month picker, account/category filters (including
   "Uncategorized"), in/out totals, add form, inline category changes, mark as transfer,
   delete with confirmation.
+- **Accounts (`/accounts`)** — add, edit, delete; per-account balances and net worth.
 - **Nav and layout** wired up; global CSS moved into layers so Tailwind utilities work.
 
 ### Not built yet
 
-The nav links to **Budget**, **Accounts**, **Import**, and **Trends**, but those pages 404.
+The nav links to **Budget**, **Import**, and **Trends**, but those pages 404.
 
 ### Merged
 
@@ -63,19 +64,19 @@ The nav links to **Budget**, **Accounts**, **Import**, and **Trends**, but those
   `12abc` are rejected instead of being read as 12; a category must match the transaction
   type; duplicate category names are refused.
 
-## Phase 2 — Accounts page (`/accounts`)
+## Phase 2 — Accounts page (`/accounts`) ✅
 
-Needed before the app can be used with real data — the dashboard's "Add an account" button
-points here.
-
-- [ ] List accounts with type, institution, source (manual / CSV), and transaction count.
-- [ ] Add-account form (`createAccount` already exists).
-- [ ] Inline edit of name/type/institution (`updateAccount` exists).
-- [ ] Delete, with a clear message when the account still has transactions
-  (`deleteAccount` already refuses — surface that nicely).
-- [ ] **Balances (new).** The schema has no balance. Add an `opening_balance_cents` and
-  `opening_balance_date` to accounts; current balance = opening + sum of transactions after
-  that date. Show per-account balances and net worth (assets − credit card debt).
+- [x] List accounts with type, bank, transaction count, and current balance.
+- [x] Add-account form with inline errors.
+- [x] Inline edit of name, type, bank, and starting balance.
+- [x] Delete (with confirmation); refused with a message while the account still has
+  transactions.
+- [x] **Balances.** Accounts have a starting balance (`opening_balance_cents`); current
+  balance = starting balance + all of the account's transactions. The page shows net worth,
+  total held, and total owed.
+- [ ] Starting balance "as of" a date, for accounts where older transactions get imported
+  later. Today the starting balance must be the balance before the *earliest* transaction.
+- [ ] Move or bulk-delete an account's transactions so a used account can be removed.
 
 ## Phase 3 — Import page (`/import`)
 
@@ -202,7 +203,7 @@ Once real CSVs are flowing in, categorizing every transaction by hand gets tedio
 ## Suggested order
 
 1. ~~Phase 0 + Phase 1 (bugs)~~ — done.
-2. Phase 2 Accounts → Phase 3 Import — the app becomes usable with real bank data.
+2. ~~Phase 2 Accounts~~ (done) → Phase 3 Import — the app becomes usable with real bank data.
 3. Phase 4 Budget → Phase 5 Trends — every nav link works.
 4. Phase 6 — categorizing becomes quick enough to keep up with monthly.
 5. Phases 9–10 (backups, tests, CI) — before trusting it with years of history.

@@ -10,6 +10,8 @@ export const accounts = sqliteTable("accounts", {
   type: text("type", { enum: accountTypes }).notNull(),
   institution: text("institution"),
   source: text("source", { enum: dataSources }).notNull().default("manual"),
+  // Balance before the first tracked transaction; negative for money owed.
+  openingBalanceCents: integer("opening_balance_cents").notNull().default(0),
   createdAt: text("created_at").notNull(),
 });
 

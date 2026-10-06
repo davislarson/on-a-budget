@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS accounts (
   type TEXT NOT NULL,
   institution TEXT,
   source TEXT NOT NULL DEFAULT 'manual',
+  opening_balance_cents INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL
 );
 
@@ -60,12 +61,28 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_transactions_import_hash
   WHERE import_hash IS NOT NULL;
 `;
 
+// Columns added after the first release; CREATE TABLE IF NOT EXISTS won't add
+// them to a database that already exists.
+const ADDED_COLUMNS = [
+  { table: "accounts", column: "opening_balance_cents", definition: "INTEGER NOT NULL DEFAULT 0" },
+];
+
+function addMissingColumns(sqlite: Database.Database) {
+  for (const { table, column, definition } of ADDED_COLUMNS) {
+    const existing = sqlite.pragma(`table_info(${table})`) as Array<{ name: string }>;
+    if (!existing.some((info) => info.name === column)) {
+      sqlite.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+    }
+  }
+}
+
 function createDb() {
   fs.mkdirSync(DATA_DIR, { recursive: true });
   const sqlite = new Database(DB_PATH);
   sqlite.pragma("journal_mode = WAL");
   sqlite.pragma("foreign_keys = ON");
   sqlite.exec(CREATE_SQL);
+  addMissingColumns(sqlite);
   const db = drizzle(sqlite, { schema });
   seedCategories(db);
   return db;
