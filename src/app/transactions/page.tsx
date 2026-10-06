@@ -5,7 +5,8 @@ import { MonthPicker } from "@/components/month-picker";
 import { CategorySelect, TransactionButtons } from "@/components/transaction-controls";
 import { TransactionForm } from "@/components/transaction-form";
 import { formatMonthLabel, monthFromParam } from "@/lib/dates";
-import { listAccounts, listCategories, listTransactions } from "@/lib/queries";
+import { listAccounts, listCategories, listRules, listTransactions } from "@/lib/queries";
+import { matchRule } from "@/lib/rules";
 
 function param(value: string | string[] | undefined) {
   return typeof value === "string" ? value : undefined;
@@ -22,6 +23,7 @@ export default async function TransactionsPage({ searchParams }: PageProps<"/tra
   const accounts = listAccounts();
   const categories = listCategories();
   const rows = listTransactions({ month, accountId: accountParam, categoryId: categoryParam });
+  const rules = listRules();
 
   const budgetRows = rows.filter((tx) => !tx.isTransfer);
   const inCents = budgetRows.filter((tx) => tx.amountCents > 0).reduce((sum, tx) => sum + tx.amountCents, 0);
@@ -126,7 +128,22 @@ export default async function TransactionsPage({ searchParams }: PageProps<"/tra
                       <Money cents={tx.amountCents} signed className={tx.amountCents > 0 && !tx.isTransfer ? "text-ok" : ""} />
                     </td>
                     <td>
-                      <TransactionButtons id={tx.id} isTransfer={tx.isTransfer} />
+                      <TransactionButtons
+                        id={tx.id}
+                        isTransfer={tx.isTransfer}
+                        canMakeRule={
+                          !tx.isTransfer &&
+                          tx.categoryId !== null &&
+                          // A rule only matches money moving the way its category expects.
+                          (tx.categoryKind === "expense" ? tx.amountCents < 0 : tx.amountCents > 0) &&
+                          (tx.payee || tx.rawDescription).trim().length >= 2 &&
+                          !matchRule(rules, {
+                            payee: tx.payee,
+                            description: tx.rawDescription,
+                            amountCents: tx.amountCents,
+                          })
+                        }
+                      />
                     </td>
                   </tr>
                 ))}
