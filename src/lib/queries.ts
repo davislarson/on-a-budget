@@ -1,6 +1,7 @@
 import { and, asc, count, desc, eq, gte, isNotNull, isNull, lte, sum } from "drizzle-orm";
 import { db } from "@/db";
-import { accounts, categories, importBatches, transactions, type Account } from "@/db/schema";
+import { accounts, categories, categoryRules, importBatches, transactions, type Account } from "@/db/schema";
+import { textMatches, type Rule } from "@/lib/rules";
 import { currentMonth, lastNMonths, monthBounds, shiftMonth } from "@/lib/dates";
 
 export function listAccounts() {
@@ -302,4 +303,41 @@ export function recentAverages(months = 3) {
     spendCents: average((month) => month.spendCents),
     spendByCategory,
   };
+}
+
+export function listRules(): Rule[] {
+  return db
+    .select({
+      id: categoryRules.id,
+      pattern: categoryRules.pattern,
+      categoryId: categoryRules.categoryId,
+      categoryName: categories.name,
+      categoryKind: categories.kind,
+      categoryArchived: categories.archived,
+    })
+    .from(categoryRules)
+    .innerJoin(categories, eq(categoryRules.categoryId, categories.id))
+    .orderBy(asc(categoryRules.pattern))
+    .all();
+}
+
+// How many transactions each rule's text appears in, whatever their current category.
+export function ruleMatchCounts(rules: Rule[]): Map<number, number> {
+  const txs = db
+    .select({ payee: transactions.payee, description: transactions.rawDescription })
+    .from(transactions)
+    .where(eq(transactions.isTransfer, false))
+    .all();
+  return new Map(
+    rules.map((rule) => [rule.id, txs.filter((tx) => textMatches(rule.pattern, tx)).length]),
+  );
+}
+
+export function countUncategorized(): number {
+  const [{ value }] = db
+    .select({ value: count() })
+    .from(transactions)
+    .where(and(isNull(transactions.categoryId), eq(transactions.isTransfer, false)))
+    .all();
+  return value;
 }

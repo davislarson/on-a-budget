@@ -140,6 +140,7 @@ export function ImportWizard({
             Added {result.imported} transaction{result.imported === 1 ? "" : "s"}.
             {result.duplicates > 0 && ` Skipped ${result.duplicates} already imported.`}
             {result.unreadable > 0 && ` Skipped ${result.unreadable} that couldn't be read.`}
+            {result.categorized > 0 && ` Your rules categorized ${result.categorized} of them.`}
           </p>
           {result.imported > 0 && (
             <Link

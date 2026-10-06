@@ -1,7 +1,12 @@
 "use client";
 
 import type { Category } from "@/db/schema";
-import { deleteTransaction, toggleTransfer, updateTransactionCategory } from "@/lib/actions";
+import {
+  createRuleFromTransaction,
+  deleteTransaction,
+  toggleTransfer,
+  updateTransactionCategory,
+} from "@/lib/actions";
 
 export function CategorySelect({
   transactionId,
@@ -42,12 +47,27 @@ export function CategorySelect({
 export function TransactionButtons({
   id,
   isTransfer,
+  canMakeRule = false,
 }: {
   id: number;
   isTransfer: boolean;
+  // Categorized, has a payee, and no rule covers it yet.
+  canMakeRule?: boolean;
 }) {
   return (
     <div className="flex justify-end gap-1">
+      {canMakeRule && (
+        <form action={createRuleFromTransaction}>
+          <input type="hidden" name="id" value={id} />
+          <button
+            className="btn btn-secondary px-2 py-1 text-xs"
+            type="submit"
+            title="Always give this payee this category"
+          >
+            Make rule
+          </button>
+        </form>
+      )}
       <form action={toggleTransfer}>
         <input type="hidden" name="id" value={id} />
         <button className="btn btn-secondary px-2 py-1 text-xs" type="submit">
