@@ -1,15 +1,24 @@
 "use server";
 
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/db";
-import { accountTypes, accounts, categories, categoryKinds, importBatches, transactions } from "@/db/schema";
+import {
+  accountTypes,
+  accounts,
+  categories,
+  categoryKinds,
+  categoryRules,
+  importBatches,
+  transactions,
+} from "@/db/schema";
 import type { ActionState } from "@/lib/action-state";
 import { importHash } from "@/lib/hash";
 import { tryDollarsToCents } from "@/lib/money";
 import { isValidIsoDate, todayIso } from "@/lib/dates";
 import { readRow, type ImportMapping, type MappedRow, type ReadRow } from "@/lib/import-mapping";
-import { existingHashes } from "@/lib/queries";
+import { existingHashes, listRules } from "@/lib/queries";
+import { matchRule, normalizePattern } from "@/lib/rules";
 
 const MAX_IMPORT_ROWS = 50_000;
 const INSERT_CHUNK = 500;
@@ -307,7 +316,7 @@ export async function deleteTransaction(formData: FormData) {
 
 export type ImportResult =
   | { error: string }
-  | { error?: undefined; imported: number; duplicates: number; unreadable: number };
+  | { error?: undefined; imported: number; duplicates: number; unreadable: number; categorized: number };
 
 export async function importCsvRows(input: {
   accountId: number;
@@ -361,7 +370,11 @@ export async function importCsvRows(input: {
   const unreadable = input.rows.length - prepared.length;
 
   // Nothing new (e.g. the same file again): leave no entry in the import history.
-  if (unique.length === 0) return { imported: 0, duplicates, unreadable };
+  if (unique.length === 0) return { imported: 0, duplicates, unreadable, categorized: 0 };
+
+  const rules = listRules();
+  const categoryIds = unique.map((row) => matchRule(rules, row)?.categoryId ?? null);
+  const categorized = categoryIds.filter((id) => id !== null).length;
 
   db.transaction((tx) => {
     const batch = tx
@@ -381,8 +394,9 @@ export async function importCsvRows(input: {
     for (let i = 0; i < unique.length; i += INSERT_CHUNK) {
       tx.insert(transactions)
         .values(
-          unique.slice(i, i + INSERT_CHUNK).map((row) => ({
+          unique.slice(i, i + INSERT_CHUNK).map((row, offset) => ({
             accountId: input.accountId,
+            categoryId: categoryIds[i + offset],
             date: row.date,
             amountCents: row.amountCents,
             payee: row.payee,
@@ -400,7 +414,7 @@ export async function importCsvRows(input: {
   });
 
   revalidateAll();
-  return { imported: unique.length, duplicates, unreadable };
+  return { imported: unique.length, duplicates, unreadable, categorized };
 }
 
 // Removes the transactions an import added (those still present) and its history entry.
@@ -411,5 +425,103 @@ export async function undoImport(formData: FormData) {
     tx.delete(transactions).where(eq(transactions.importBatchId, id)).run();
     tx.delete(importBatches).where(eq(importBatches.id, id)).run();
   });
+  revalidateAll();
+}
+
+// Categorizes uncategorized, non-transfer transactions that match a rule.
+// Never changes a category that's already set. Returns how many were updated.
+function applyRulesToUncategorized(): number {
+  const rules = listRules();
+  if (rules.length === 0) return 0;
+  const pending = db
+    .select({
+      id: transactions.id,
+      payee: transactions.payee,
+      description: transactions.rawDescription,
+      amountCents: transactions.amountCents,
+    })
+    .from(transactions)
+    .where(and(isNull(transactions.categoryId), eq(transactions.isTransfer, false)))
+    .all();
+  let updated = 0;
+  db.transaction((tx) => {
+    for (const row of pending) {
+      const rule = matchRule(rules, row);
+      if (!rule) continue;
+      tx.update(transactions).set({ categoryId: rule.categoryId }).where(eq(transactions.id, row.id)).run();
+      updated += 1;
+    }
+  });
+  return updated;
+}
+
+function categorizedMessage(count: number) {
+  return count === 0
+    ? "No uncategorized transactions matched."
+    : `Categorized ${count} transaction${count === 1 ? "" : "s"}.`;
+}
+
+function validateRule(
+  formData: FormData,
+  exceptId?: number,
+): { error: string } | { pattern: string; categoryId: number } {
+  const pattern = normalizePattern(formString(formData, "pattern"));
+  if (pattern.length < 2) return { error: "Enter at least 2 characters to match on." };
+  const categoryId = parseId(formData.get("categoryId"));
+  const category = categoryId ? findCategory(categoryId) : undefined;
+  if (!categoryId || !category || category.archived) return { error: "Pick a category." };
+  const duplicate = listRules().some((rule) => rule.id !== exceptId && rule.pattern === pattern);
+  if (duplicate) return { error: `You already have a rule for "${pattern}".` };
+  return { pattern, categoryId };
+}
+
+export async function createRule(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const rule = validateRule(formData);
+  if ("error" in rule) return fail(formData, rule.error);
+  db.insert(categoryRules).values({ ...rule, createdAt: new Date().toISOString() }).run();
+  const updated = applyRulesToUncategorized();
+  revalidateAll();
+  return { message: `Rule added. ${categorizedMessage(updated)}` };
+}
+
+export async function updateRule(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const id = parseId(formData.get("id"));
+  if (!id) return fail(formData, "That rule no longer exists.");
+  const rule = validateRule(formData, id);
+  if ("error" in rule) return fail(formData, rule.error);
+  db.update(categoryRules).set(rule).where(eq(categoryRules.id, id)).run();
+  revalidateAll();
+  return {};
+}
+
+// Deleting a rule leaves the transactions it already categorized as they are.
+export async function deleteRule(formData: FormData) {
+  const id = parseId(formData.get("id"));
+  if (!id) return;
+  db.delete(categoryRules).where(eq(categoryRules.id, id)).run();
+  revalidateAll();
+}
+
+export async function applyRules(): Promise<ActionState> {
+  const updated = applyRulesToUncategorized();
+  revalidateAll();
+  return { message: categorizedMessage(updated) };
+}
+
+// "Always categorize this payee like this": makes a rule from a categorized
+// transaction and applies it to anything still uncategorized.
+export async function createRuleFromTransaction(formData: FormData) {
+  const id = parseId(formData.get("id"));
+  if (!id) return;
+  const tx = db.select().from(transactions).where(eq(transactions.id, id)).get();
+  if (!tx || tx.isTransfer || tx.categoryId === null) return;
+  const pattern = normalizePattern(tx.payee || tx.rawDescription);
+  if (pattern.length < 2) return;
+  if (!listRules().some((rule) => rule.pattern === pattern)) {
+    db.insert(categoryRules)
+      .values({ pattern, categoryId: tx.categoryId, createdAt: new Date().toISOString() })
+      .run();
+  }
+  applyRulesToUncategorized();
   revalidateAll();
 }

@@ -28,6 +28,7 @@ _Last updated: 2026-10-05_
   delete with confirmation.
 - **Accounts (`/accounts`)** — add, edit, delete; per-account balances and net worth.
 - **Budget (`/budget`)** — manage spending and income categories and their monthly caps.
+- **Rules (`/rules`)** — automatic categorization by payee or description text.
 - **Trends (`/trends`)** — income, spending, and per-category charts over 6–24 months.
 - **Import (`/import`)** — CSV upload with column matching, preview, duplicate skipping,
   remembered mappings, and import history with undo.
@@ -129,11 +130,15 @@ Every page in the nav now exists. What's left is in Phases 6–10 below.
 
 ## Phase 6 — Make categorizing fast
 
-Once real CSVs are flowing in, categorizing every transaction by hand gets tedious.
-
-- [ ] **Auto-categorization rules**: "payee contains `TRADER JOE` → Groceries". New table
-  `rules(pattern, category_id, priority)`; apply on import and on demand.
-- [ ] "Always categorize this payee as…" shortcut from the transactions table.
+- [x] **Auto-categorization rules** (`/rules`): "payee or description contains `trader joe`
+  → Groceries". Applied on every import and on demand; only ever fills in uncategorized
+  transactions. The longest matching text wins; a spending rule only applies to money out
+  and an income rule to money in.
+- [x] "Make rule" shortcut next to a categorized transaction, which also categorizes other
+  uncategorized transactions from the same payee.
+- [ ] Preview what a rule would match before saving it, and an option to re-categorize
+  transactions that already have a category.
+- [ ] Rules for transfers ("contains `payment thank you` → mark as transfer").
 - [ ] Clean up ugly bank payee strings (`SQ *COFFEE SHOP 1234 CITY ST`) into readable names.
 - [ ] **Transfer detection**: suggest pairs of opposite-amount transactions on the same or
   nearby dates across two of your accounts (e.g. checking → credit card payment), and mark
@@ -172,6 +177,8 @@ Once real CSVs are flowing in, categorizing every transaction by hand gets tedio
   [schema.ts](src/db/schema.ts) and in raw SQL in [src/db/index.ts](src/db/index.ts) — and
   will drift. Switch to Drizzle migrations (`drizzle.config.ts` is already set up; the
   `./drizzle` folder doesn't exist yet) and run them on startup.
+- [x] `BUDGET_DB_PATH` points the app at a different database file, so testing never touches
+  real data.
 - [ ] Sample-data script (`npm run seed:sample`) and a reset script, instead of hand-written
   SQL.
 
@@ -214,6 +221,6 @@ Once real CSVs are flowing in, categorizing every transaction by hand gets tedio
 1. ~~Phase 0 + Phase 1 (bugs)~~ — done.
 2. ~~Phase 2 Accounts → Phase 3 Import~~ — done; the app is usable with real bank data.
 3. ~~Phase 4 Budget → Phase 5 Trends~~ — done; every nav link works.
-4. Phase 6 — categorizing becomes quick enough to keep up with monthly.
+4. Phase 6 — rules are done; transfer detection and bulk actions remain.
 5. Phases 9–10 (backups, tests, CI) — before trusting it with years of history.
 6. Phases 7–8 and "Later" as wanted.

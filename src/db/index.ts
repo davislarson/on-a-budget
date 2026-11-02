@@ -5,8 +5,12 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import * as schema from "./schema";
 import { seedCategories } from "./seed";
 
-const DATA_DIR = path.join(process.cwd(), "data");
-const DB_PATH = path.join(DATA_DIR, "budget.sqlite");
+// BUDGET_DB_PATH points the app at a different database file, e.g. a throwaway
+// one for testing, so the real data in data/budget.sqlite is never touched.
+const DB_PATH = process.env.BUDGET_DB_PATH
+  ? path.resolve(process.env.BUDGET_DB_PATH)
+  : path.join(process.cwd(), "data", "budget.sqlite");
+const DATA_DIR = path.dirname(DB_PATH);
 
 const CREATE_SQL = `
 CREATE TABLE IF NOT EXISTS accounts (
@@ -52,6 +56,13 @@ CREATE TABLE IF NOT EXISTS transactions (
   import_hash TEXT,
   is_transfer INTEGER NOT NULL DEFAULT 0,
   import_batch_id INTEGER REFERENCES import_batches(id)
+);
+
+CREATE TABLE IF NOT EXISTS category_rules (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  pattern TEXT NOT NULL,
+  category_id INTEGER NOT NULL REFERENCES categories(id),
+  created_at TEXT NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_transactions_date ON transactions(date);

@@ -53,6 +53,16 @@ export const transactions = sqliteTable("transactions", {
   importBatchId: integer("import_batch_id").references(() => importBatches.id),
 });
 
+// "If the payee or description contains `pattern`, use this category."
+export const categoryRules = sqliteTable("category_rules", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  pattern: text("pattern").notNull(),
+  categoryId: integer("category_id")
+    .notNull()
+    .references(() => categories.id),
+  createdAt: text("created_at").notNull(),
+});
+
 export type Account = typeof accounts.$inferSelect;
 export type Category = typeof categories.$inferSelect;
 export type Transaction = typeof transactions.$inferSelect;
