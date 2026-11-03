@@ -48,6 +48,11 @@ describe("groupMerchants", () => {
     expect(only.description).toBe("");
   });
 
+  it("removes a long store number along with its #", () => {
+    const [only] = groupMerchants([{ id: 1, payee: "CVS/PHARMACY #0912", description: "", amountCents: -500 }]);
+    expect(only.text).toBe("CVS/PHARMACY");
+  });
+
   it("skips rows with no text or a zero amount", () => {
     expect(
       groupMerchants([

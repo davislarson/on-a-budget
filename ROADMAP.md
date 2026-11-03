@@ -31,7 +31,8 @@ _Last updated: 2026-11-02_
 - **Rules (`/rules`)** — automatic categorization by payee or description text.
 - **Trends (`/trends`)** — income, spending, and per-category charts over 6–24 months.
 - **Import (`/import`)** — CSV upload with column matching, preview, duplicate skipping,
-  remembered mappings, and import history with undo.
+  remembered mappings, and import history with undo; AI-suggested categories to review, using
+  a local Ollama model.
 - **Nav and layout** wired up; global CSS moved into layers so Tailwind utilities work.
 
 ### Not built yet
@@ -178,16 +179,20 @@ and you review the suggestions before they apply.
   `phi4-mini:3.8b` 9/29 (31%); `qwen2.5:14b` 17/25 (68%), 4 unsure. Best setup so far: `qwen2.5:14b --details` (description and
   typical amount in the prompt) at 21/25 (84%), 4 unsure, about 1 minute. Reasons and 15 examples
   didn't beat it, though 29 merchants is too few to rule them out.
+  The score is sensitive: removing a stray `#` from merchant names dropped batches of 25 to 19/25
+  (76%), while batches of 10 stayed at 21/25 (84%), so the app uses 10. Treat it as roughly 76-84%.
 - [x] **AI layer** ([src/lib/ai/](src/lib/ai/)): Ollama client, merchant grouping, the prompt, and
   answer checking, with Vitest tests (`npm test`; starts part of Phase 10). Not connected to the
   app yet. `OLLAMA_MODEL` and `OLLAMA_URL` override the defaults.
-- [ ] **Storage:** a `category_suggestions` table, defined in both
-  [schema.ts](src/db/schema.ts) and [src/db/index.ts](src/db/index.ts). Undoing an import also
-  removes its suggestions.
-- [ ] **Import page:** batched AI calls with a progress bar, a review screen grouped by merchant
-  (accept all or fix a few), and a retry message if Ollama isn't running.
-- [ ] **Learning:** include examples from your categorized history in the prompt, and offer to
-  create a rule when you accept a suggestion.
+- [x] **Storage:** a `category_suggestions` table, defined in both
+  [schema.ts](src/db/schema.ts) and [src/db/index.ts](src/db/index.ts). Undoing an import or
+  deleting a transaction also removes its suggestions.
+- [x] **Import page:** suggestions start after each import, with progress, a stop button, a review
+  list grouped by merchant (accept all, fix, or dismiss), and a retry message if Ollama isn't
+  running.
+- [x] **Rule offer:** "Make a rule" when accepting, so that merchant skips the AI from then on.
+- [ ] **Examples from your history in the prompt.** Not turned on: 15 examples scored lower
+  (19/25, 76%) than none (21/25, 84%). Retest with `--examples` as more transactions are imported.
 
 ## Phase 7 — Transactions page polish
 
@@ -262,7 +267,7 @@ and you review the suggestions before they apply.
 1. ~~Phase 0 + Phase 1 (bugs)~~ — done.
 2. ~~Phase 2 Accounts → Phase 3 Import~~ — done; the app is usable with real bank data.
 3. ~~Phase 4 Budget → Phase 5 Trends~~ — done; every nav link works.
-4. Phase 6A — AI-suggested categories on import, once rules are merged.
+4. ~~Phase 6A — AI-suggested categories on import~~ — done, apart from examples.
 5. Phase 6 — rules are done; transfer detection and bulk actions remain.
 6. Phases 9–10 (backups, tests, CI) — before trusting it with years of history.
 7. Phases 7–8 and "Later" as wanted.

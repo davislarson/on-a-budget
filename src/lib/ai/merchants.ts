@@ -26,7 +26,7 @@ export function merchantKey(text: string): string {
 }
 
 function withoutLongNumbers(text: string): string {
-  return text.replace(/\d{4,}/g, "").trim();
+  return text.replace(/#?\d{4,}/g, "").trim();
 }
 
 // One entry per merchant and direction, so a merchant that appears 12 times needs

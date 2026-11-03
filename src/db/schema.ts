@@ -63,6 +63,25 @@ export const categoryRules = sqliteTable("category_rules", {
   createdAt: text("created_at").notNull(),
 });
 
+export const suggestionStatuses = ["pending", "dismissed"] as const;
+
+// What the AI proposed for an imported transaction. Nothing here changes the
+// transaction until it's accepted, which removes the row. A null category means the
+// AI was unsure; dismissed rows stay so the merchant isn't asked about again.
+export const categorySuggestions = sqliteTable("category_suggestions", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  transactionId: integer("transaction_id")
+    .notNull()
+    .unique()
+    .references(() => transactions.id, { onDelete: "cascade" }),
+  categoryId: integer("category_id").references(() => categories.id),
+  merchantKey: text("merchant_key").notNull(),
+  merchantText: text("merchant_text").notNull(),
+  status: text("status", { enum: suggestionStatuses }).notNull().default("pending"),
+  model: text("model").notNull(),
+  createdAt: text("created_at").notNull(),
+});
+
 export type Account = typeof accounts.$inferSelect;
 export type Category = typeof categories.$inferSelect;
 export type Transaction = typeof transactions.$inferSelect;

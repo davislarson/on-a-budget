@@ -2,7 +2,7 @@ import type { CategoryKind, Merchant } from "./merchants";
 import { OllamaError, type AskModel } from "./ollama";
 import { buildCategorizeRequest, UNSURE, type CategorizedExample, type CategoryChoice } from "./prompt";
 
-export const CHUNK_SIZE = 25;
+export const CHUNK_SIZE = 10;
 
 export type Suggestion = {
   merchant: Merchant;

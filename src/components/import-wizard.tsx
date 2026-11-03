@@ -4,7 +4,8 @@ import Link from "next/link";
 import Papa from "papaparse";
 import { useMemo, useState, useTransition } from "react";
 import { Money } from "@/components/money";
-import type { Account } from "@/db/schema";
+import { SuggestionReview, useSuggestionRunner } from "@/components/suggestion-review";
+import type { Account, Category } from "@/db/schema";
 import { importCsvRows, undoImport, type ImportResult } from "@/lib/actions";
 import {
   emptyMapping,
@@ -17,6 +18,7 @@ import {
   type CsvRow,
   type ImportMapping,
 } from "@/lib/import-mapping";
+import type { SuggestionGroup } from "@/lib/queries";
 
 const PREVIEW_ROWS = 20;
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
@@ -32,9 +34,17 @@ function mappingFor(accountId: number, headers: string[], savedMappings: Record<
 export function ImportWizard({
   accounts,
   savedMappings,
+  categories,
+  suggestions,
+  uncheckedCount,
+  modelName,
 }: {
   accounts: Account[];
   savedMappings: Record<number, string>;
+  categories: Category[];
+  suggestions: SuggestionGroup[];
+  uncheckedCount: number;
+  modelName: string;
 }) {
   const [accountId, setAccountId] = useState(accounts[0].id);
   const [file, setFile] = useState<ParsedFile | null>(null);
@@ -45,6 +55,7 @@ export function ImportWizard({
   const [pending, startTransition] = useTransition();
   // Remounts the file input so the same file can be chosen again.
   const [inputKey, setInputKey] = useState(0);
+  const runner = useSuggestionRunner();
 
   function applyMapping(nextAccountId: number, headers: string[]) {
     const next = mappingFor(nextAccountId, headers, savedMappings);
@@ -107,6 +118,8 @@ export function ImportWizard({
       }
       setResult({ ...outcome, month: latest.slice(0, 7) });
       reset();
+      // Not awaited: the import is finished, and the AI can take minutes.
+      if (outcome.imported > outcome.categorized) void runner.run();
     });
   }
 
@@ -145,13 +158,21 @@ export function ImportWizard({
           {result.imported > 0 && (
             <Link
               href={`/transactions?month=${result.month}&account=${accountId}&category=uncategorized`}
-              className="btn btn-primary mt-4"
+              className="btn btn-secondary mt-4"
             >
-              Categorize them
+              Categorize by hand
             </Link>
           )}
         </section>
       )}
+
+      <SuggestionReview
+        runner={runner}
+        groups={suggestions}
+        uncheckedCount={uncheckedCount}
+        categories={categories}
+        modelName={modelName}
+      />
 
       <section className="card p-5">
         <h2 className="font-semibold">1. Choose an account and a file</h2>
