@@ -1,6 +1,15 @@
 import { and, asc, count, desc, eq, gte, isNotNull, isNull, lte, sum } from "drizzle-orm";
 import { db } from "@/db";
-import { accounts, categories, categoryRules, importBatches, transactions, type Account } from "@/db/schema";
+import {
+  accounts,
+  categories,
+  categoryRules,
+  categorySuggestions,
+  importBatches,
+  transactions,
+  type Account,
+} from "@/db/schema";
+import type { CategoryKind, UncategorizedRow } from "@/lib/ai/merchants";
 import { textMatches, type Rule } from "@/lib/rules";
 import { currentMonth, lastNMonths, monthBounds, shiftMonth } from "@/lib/dates";
 
@@ -331,6 +340,85 @@ export function ruleMatchCounts(rules: Rule[]): Map<number, number> {
   return new Map(
     rules.map((rule) => [rule.id, txs.filter((tx) => textMatches(rule.pattern, tx)).length]),
   );
+}
+
+// Imported transactions rules left uncategorized that the AI hasn't been asked about.
+export function listUncheckedRows(): UncategorizedRow[] {
+  return db
+    .select({
+      id: transactions.id,
+      payee: transactions.payee,
+      description: transactions.rawDescription,
+      amountCents: transactions.amountCents,
+    })
+    .from(transactions)
+    .leftJoin(categorySuggestions, eq(categorySuggestions.transactionId, transactions.id))
+    .where(
+      and(
+        isNotNull(transactions.importBatchId),
+        isNull(transactions.categoryId),
+        eq(transactions.isTransfer, false),
+        isNull(categorySuggestions.id),
+      ),
+    )
+    .orderBy(asc(transactions.id))
+    .all();
+}
+
+export type SuggestionGroup = {
+  merchantKey: string;
+  merchantText: string;
+  kind: CategoryKind;
+  // Null when the AI was unsure or the category it chose has since been archived.
+  categoryId: number | null;
+  count: number;
+  typicalCents: number;
+};
+
+// One entry per merchant awaiting review. Transactions categorized some other way
+// in the meantime drop out, since they no longer need a decision.
+export function listPendingSuggestions(): SuggestionGroup[] {
+  const rows = db
+    .select({
+      merchantKey: categorySuggestions.merchantKey,
+      merchantText: categorySuggestions.merchantText,
+      categoryId: categorySuggestions.categoryId,
+      categoryArchived: categories.archived,
+      amountCents: transactions.amountCents,
+    })
+    .from(categorySuggestions)
+    .innerJoin(transactions, eq(categorySuggestions.transactionId, transactions.id))
+    .leftJoin(categories, eq(categorySuggestions.categoryId, categories.id))
+    .where(
+      and(
+        eq(categorySuggestions.status, "pending"),
+        isNull(transactions.categoryId),
+        eq(transactions.isTransfer, false),
+      ),
+    )
+    .orderBy(asc(categorySuggestions.id))
+    .all();
+
+  const groups = new Map<string, SuggestionGroup & { totalCents: number }>();
+  for (const row of rows) {
+    const group = groups.get(row.merchantKey) ?? {
+      merchantKey: row.merchantKey,
+      merchantText: row.merchantText,
+      kind: row.amountCents < 0 ? ("expense" as const) : ("income" as const),
+      categoryId: null,
+      count: 0,
+      typicalCents: 0,
+      totalCents: 0,
+    };
+    if (group.categoryId === null && row.categoryId !== null && !row.categoryArchived) {
+      group.categoryId = row.categoryId;
+    }
+    group.count += 1;
+    group.totalCents += Math.abs(row.amountCents);
+    group.typicalCents = Math.round(group.totalCents / group.count);
+    groups.set(row.merchantKey, group);
+  }
+  return [...groups.values()];
 }
 
 export function countUncategorized(): number {

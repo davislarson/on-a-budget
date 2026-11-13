@@ -4,7 +4,7 @@ A local-first personal budgeting app. Next.js 16 (App Router) + Tailwind 4, with
 local SQLite file (`data/budget.sqlite`) accessed through Drizzle. Everything runs on your
 own machine; no financial data leaves it or gets committed.
 
-_Last updated: 2026-10-05_
+_Last updated: 2026-11-02_
 
 ---
 
@@ -31,7 +31,8 @@ _Last updated: 2026-10-05_
 - **Rules (`/rules`)** — automatic categorization by payee or description text.
 - **Trends (`/trends`)** — income, spending, and per-category charts over 6–24 months.
 - **Import (`/import`)** — CSV upload with column matching, preview, duplicate skipping,
-  remembered mappings, and import history with undo.
+  remembered mappings, and import history with undo; AI-suggested categories to review, using
+  a local Ollama model.
 - **Nav and layout** wired up; global CSS moved into layers so Tailwind utilities work.
 
 ### Not built yet
@@ -148,6 +149,51 @@ Every page in the nav now exists. What's left is in Phases 6–10 below.
 - [ ] Split a transaction across categories (e.g. a Target run that's part groceries, part
   household).
 
+## Phase 6A — AI-suggested categories on import
+
+Every CSV import asks an LLM to suggest categories for whatever the rules didn't categorize,
+and you review the suggestions before they apply.
+
+**Decisions**
+
+- **Review, never auto-apply.** Suggestions are stored apart from transactions and change
+  nothing until accepted. Local models made confident mistakes in an early test (Panda
+  Express → "Fun").
+- **Local only, with Ollama** (`qwen2.5:14b` so far). No hosted AI, so nothing leaves your
+  machine.
+- **The import always saves first**, so an AI failure can't lose one.
+- **Rules stay, and they run first.** Use them for anything you already know the category of.
+  The AI only sees what's still uncategorized and never overwrites a category.
+- **Answers are checked**: only one of your active categories for that direction, or "unsure",
+  is accepted. "Unsure" stays uncategorized, and so do refunds, matching how rules treat them.
+
+**Steps**
+
+- [x] Merge the rules work ([#7](https://github.com/davislarson/on-a-budget/pull/7)).
+- [x] **Measure accuracy first.** A script compares each model's picks with transactions you've
+  already categorized. The target was 85%+ correct on merchants it doesn't mark "unsure"; 84% was
+  accepted because every suggestion gets reviewed. Retest as more transactions are imported.
+  Run with `npm run eval:ai -- <model>`.
+  First run (2026-11-02, 29 merchants, no examples in the prompt): `phi4-mini:3.8b` 12/29 (41%);
+  `mistral:7b` 19/26 (73%), with a batch of 3 timing out twice. With category descriptions:
+  `phi4-mini:3.8b` 9/29 (31%); `qwen2.5:14b` 17/25 (68%), 4 unsure. Best setup so far: `qwen2.5:14b --details` (description and
+  typical amount in the prompt) at 21/25 (84%), 4 unsure, about 1 minute. Reasons and 15 examples
+  didn't beat it, though 29 merchants is too few to rule them out.
+  The score is sensitive: removing a stray `#` from merchant names dropped batches of 25 to 19/25
+  (76%), while batches of 10 stayed at 21/25 (84%), so the app uses 10. Treat it as roughly 76-84%.
+- [x] **AI layer** ([src/lib/ai/](src/lib/ai/)): Ollama client, merchant grouping, the prompt, and
+  answer checking, with Vitest tests (`npm test`; starts part of Phase 10). Not connected to the
+  app yet. `OLLAMA_MODEL` and `OLLAMA_URL` override the defaults.
+- [x] **Storage:** a `category_suggestions` table, defined in both
+  [schema.ts](src/db/schema.ts) and [src/db/index.ts](src/db/index.ts). Undoing an import or
+  deleting a transaction also removes its suggestions.
+- [x] **Import page:** suggestions start after each import, with progress, a stop button, a review
+  list grouped by merchant (accept all, fix, or dismiss), and a retry message if Ollama isn't
+  running.
+- [x] **Rule offer:** "Make a rule" when accepting, so that merchant skips the AI from then on.
+- [ ] **Examples from your history in the prompt.** Not turned on: 15 examples scored lower
+  (19/25, 76%) than none (21/25, 84%). Retest with `--examples` as more transactions are imported.
+
 ## Phase 7 — Transactions page polish
 
 - [ ] Search by payee/description.
@@ -221,6 +267,7 @@ Every page in the nav now exists. What's left is in Phases 6–10 below.
 1. ~~Phase 0 + Phase 1 (bugs)~~ — done.
 2. ~~Phase 2 Accounts → Phase 3 Import~~ — done; the app is usable with real bank data.
 3. ~~Phase 4 Budget → Phase 5 Trends~~ — done; every nav link works.
-4. Phase 6 — rules are done; transfer detection and bulk actions remain.
-5. Phases 9–10 (backups, tests, CI) — before trusting it with years of history.
-6. Phases 7–8 and "Later" as wanted.
+4. ~~Phase 6A — AI-suggested categories on import~~ — done, apart from examples.
+5. Phase 6 — rules are done; transfer detection and bulk actions remain.
+6. Phases 9–10 (backups, tests, CI) — before trusting it with years of history.
+7. Phases 7–8 and "Later" as wanted.

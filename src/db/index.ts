@@ -65,6 +65,18 @@ CREATE TABLE IF NOT EXISTS category_rules (
   created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS category_suggestions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  transaction_id INTEGER NOT NULL UNIQUE REFERENCES transactions(id) ON DELETE CASCADE,
+  category_id INTEGER REFERENCES categories(id),
+  merchant_key TEXT NOT NULL,
+  merchant_text TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  model TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_suggestions_merchant ON category_suggestions(merchant_key);
 CREATE INDEX IF NOT EXISTS idx_transactions_date ON transactions(date);
 CREATE INDEX IF NOT EXISTS idx_transactions_account ON transactions(account_id);
 CREATE INDEX IF NOT EXISTS idx_transactions_category ON transactions(category_id);

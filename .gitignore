@@ -41,5 +41,6 @@ next-env.d.ts
 # local finance data — never commit bank CSVs or the database
 /data/*.sqlite
 /data/*.sqlite-*
+/data/ai-accuracy-report.txt
 /uploads/
 *.csv

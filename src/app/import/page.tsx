@@ -1,8 +1,17 @@
 import Link from "next/link";
 import { connection } from "next/server";
 import { ImportWizard, UndoImportButton } from "@/components/import-wizard";
+import { groupMerchants } from "@/lib/ai/merchants";
+import { ollamaModel } from "@/lib/ai/ollama";
 import { todayIso } from "@/lib/dates";
-import { lastMappingByAccount, listAccounts, listImportHistory } from "@/lib/queries";
+import {
+  lastMappingByAccount,
+  listAccounts,
+  listCategories,
+  listImportHistory,
+  listPendingSuggestions,
+  listUncheckedRows,
+} from "@/lib/queries";
 
 export default async function ImportPage() {
   // Read accounts and history at request time rather than baking them in at build time.
@@ -22,7 +31,14 @@ export default async function ImportPage() {
           </Link>
         </div>
       ) : (
-        <ImportWizard accounts={accounts} savedMappings={lastMappingByAccount()} />
+        <ImportWizard
+          accounts={accounts}
+          savedMappings={lastMappingByAccount()}
+          categories={listCategories()}
+          suggestions={listPendingSuggestions()}
+          uncheckedCount={groupMerchants(listUncheckedRows()).length}
+          modelName={ollamaModel()}
+        />
       )}
 
       {history.length > 0 && (

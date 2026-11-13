@@ -1,6 +1,6 @@
 "use server";
 
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/db";
 import {
@@ -9,15 +9,19 @@ import {
   categories,
   categoryKinds,
   categoryRules,
+  categorySuggestions,
   importBatches,
   transactions,
 } from "@/db/schema";
 import type { ActionState } from "@/lib/action-state";
+import { categorizeChunk, chunkMerchants } from "@/lib/ai/categorize";
+import { groupMerchants } from "@/lib/ai/merchants";
+import { createOllamaAsk, ollamaModel, OllamaError } from "@/lib/ai/ollama";
 import { importHash } from "@/lib/hash";
 import { tryDollarsToCents } from "@/lib/money";
 import { isValidIsoDate, todayIso } from "@/lib/dates";
 import { readRow, type ImportMapping, type MappedRow, type ReadRow } from "@/lib/import-mapping";
-import { existingHashes, listRules } from "@/lib/queries";
+import { existingHashes, listCategories, listRules, listUncheckedRows } from "@/lib/queries";
 import { matchRule, normalizePattern } from "@/lib/rules";
 
 const MAX_IMPORT_ROWS = 50_000;
@@ -523,5 +527,102 @@ export async function createRuleFromTransaction(formData: FormData) {
       .run();
   }
   applyRulesToUncategorized();
+  revalidateAll();
+}
+
+export type SuggestStep = { error: string } | { error?: undefined; checked: number; remaining: number };
+
+// Asks the AI about the next batch of merchants and saves its answers for review.
+// The page calls this repeatedly to show progress, and can pick up where it left off.
+export async function suggestNextChunk(): Promise<SuggestStep> {
+  const merchants = groupMerchants(listUncheckedRows());
+  if (merchants.length === 0) return { checked: 0, remaining: 0 };
+  const [chunk] = chunkMerchants(merchants);
+  const model = ollamaModel();
+
+  let suggestions;
+  try {
+    suggestions = await categorizeChunk(chunk.kind, chunk.merchants, listCategories(), createOllamaAsk(model));
+  } catch (error) {
+    if (error instanceof OllamaError) return { error: error.message };
+    throw error;
+  }
+
+  const createdAt = new Date().toISOString();
+  const values = suggestions.flatMap(({ merchant, categoryId }) =>
+    merchant.transactionIds.map((transactionId) => ({
+      transactionId,
+      categoryId,
+      merchantKey: merchant.key,
+      merchantText: merchant.text,
+      model,
+      createdAt,
+    })),
+  );
+  db.transaction((tx) => {
+    // A transaction can be removed while the AI is thinking, e.g. by undoing the import.
+    const existing = tx
+      .select({ id: transactions.id })
+      .from(transactions)
+      .where(inArray(transactions.id, values.map((value) => value.transactionId)))
+      .all();
+    const ids = new Set(existing.map((row) => row.id));
+    for (let i = 0; i < values.length; i += INSERT_CHUNK) {
+      const rows = values.slice(i, i + INSERT_CHUNK).filter((value) => ids.has(value.transactionId));
+      if (rows.length > 0) tx.insert(categorySuggestions).values(rows).onConflictDoNothing().run();
+    }
+  });
+  revalidateAll();
+  return { checked: chunk.merchants.length, remaining: merchants.length - chunk.merchants.length };
+}
+
+export type SuggestionDecision = { merchantKey: string; categoryId: number; makeRule: boolean };
+
+// Applies your choices to the merchants' uncategorized transactions, and optionally
+// makes a rule so that merchant is handled without the AI from then on.
+export async function acceptSuggestions(decisions: SuggestionDecision[]): Promise<ActionState> {
+  const active = listCategories();
+  for (const decision of decisions) {
+    const category = active.find((choice) => choice.id === decision.categoryId);
+    if (!category || !decision.merchantKey.startsWith(`${category.kind}|`)) {
+      return { error: "One of those categories is no longer available. Pick another." };
+    }
+  }
+
+  const rules = listRules();
+  let updated = 0;
+  db.transaction((tx) => {
+    for (const { merchantKey, categoryId, makeRule } of decisions) {
+      const pending = tx
+        .select({ id: categorySuggestions.transactionId })
+        .from(categorySuggestions)
+        .where(and(eq(categorySuggestions.merchantKey, merchantKey), eq(categorySuggestions.status, "pending")))
+        .all()
+        .map((row) => row.id);
+      if (pending.length === 0) continue;
+      updated += tx
+        .update(transactions)
+        .set({ categoryId })
+        .where(and(inArray(transactions.id, pending), isNull(transactions.categoryId), eq(transactions.isTransfer, false)))
+        .run().changes;
+      tx.delete(categorySuggestions).where(inArray(categorySuggestions.transactionId, pending)).run();
+
+      const pattern = normalizePattern(merchantKey.slice(merchantKey.indexOf("|") + 1));
+      if (makeRule && pattern.length >= 2 && !rules.some((rule) => rule.pattern === pattern)) {
+        tx.insert(categoryRules).values({ pattern, categoryId, createdAt: new Date().toISOString() }).run();
+      }
+    }
+  });
+  if (decisions.some((decision) => decision.makeRule)) updated += applyRulesToUncategorized();
+  revalidateAll();
+  return { message: categorizedMessage(updated) };
+}
+
+// Leaves the merchant's transactions uncategorized, and doesn't ask about them again.
+export async function dismissSuggestions(merchantKey: string) {
+  db.update(categorySuggestions)
+    .set({ status: "dismissed" })
+    .where(and(eq(categorySuggestions.merchantKey, merchantKey), eq(categorySuggestions.status, "pending")))
+    .run();
   revalidateAll();
 }
