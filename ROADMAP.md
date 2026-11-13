@@ -4,7 +4,7 @@ A local-first personal budgeting app. Next.js 16 (App Router) + Tailwind 4, with
 local SQLite file (`data/budget.sqlite`) accessed through Drizzle. Everything runs on your
 own machine; no financial data leaves it or gets committed.
 
-_Last updated: 2026-11-02_
+_Last updated: 2026-11-12_
 
 ---
 
@@ -25,7 +25,8 @@ _Last updated: 2026-11-02_
   screen when there are no accounts.
 - **Transactions (`/transactions`)** — month picker, account/category filters (including
   "Uncategorized"), in/out totals, add form, inline category changes, mark as transfer,
-  delete with confirmation.
+  delete with confirmation; tick rows to set a category, mark transfers, or delete in bulk;
+  suggested transfer pairs between your accounts.
 - **Accounts (`/accounts`)** — add, edit, delete; per-account balances and net worth.
 - **Budget (`/budget`)** — manage spending and income categories and their monthly caps.
 - **Rules (`/rules`)** — automatic categorization by payee or description text.
@@ -141,11 +142,15 @@ Every page in the nav now exists. What's left is in Phases 6–10 below.
   transactions that already have a category.
 - [ ] Rules for transfers ("contains `payment thank you` → mark as transfer").
 - [ ] Clean up ugly bank payee strings (`SQ *COFFEE SHOP 1234 CITY ST`) into readable names.
-- [ ] **Transfer detection**: suggest pairs of opposite-amount transactions on the same or
-  nearby dates across two of your accounts (e.g. checking → credit card payment), and mark
-  both as transfers in one click.
-- [ ] Bulk actions on the transactions table: select several rows → set category / mark
-  transfer / delete.
+- [x] **Transfer detection**: the transactions page suggests pairs where the same amount
+  leaves one account and arrives in another within 3 days (e.g. checking → credit card
+  payment); mark a pair as transfers in one click, mark all shown, or say "Not a transfer"
+  so it isn't suggested again (stored in `transfer_dismissals`). Pairs where both sides
+  already have a category aren't suggested. The dashboard links to them.
+- [x] Bulk actions on the transactions table: tick rows (or all on screen) → set category /
+  mark transfer / not transfer / delete. Setting a category skips transfers.
+- [ ] Transfer pairs within one account are never suggested, and neither are transfers to an
+  account you don't track (e.g. Venmo); use bulk "Mark transfer" or a transfer rule for those.
 - [ ] Split a transaction across categories (e.g. a Target run that's part groceries, part
   household).
 
@@ -268,6 +273,7 @@ and you review the suggestions before they apply.
 2. ~~Phase 2 Accounts → Phase 3 Import~~ — done; the app is usable with real bank data.
 3. ~~Phase 4 Budget → Phase 5 Trends~~ — done; every nav link works.
 4. ~~Phase 6A — AI-suggested categories on import~~ — done, apart from examples.
-5. Phase 6 — rules are done; transfer detection and bulk actions remain.
+5. ~~Phase 6 — rules, transfer detection, bulk actions~~ — done; rule previews, transfer
+   rules, payee clean-up, and splits remain.
 6. Phases 9–10 (backups, tests, CI) — before trusting it with years of history.
 7. Phases 7–8 and "Later" as wanted.

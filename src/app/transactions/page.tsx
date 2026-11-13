@@ -1,11 +1,13 @@
 import Link from "next/link";
 import { Suspense } from "react";
+import { BulkSelection, RowCheckbox, SelectAllCheckbox } from "@/components/bulk-selection";
 import { Money } from "@/components/money";
 import { MonthPicker } from "@/components/month-picker";
 import { CategorySelect, TransactionButtons } from "@/components/transaction-controls";
 import { TransactionForm } from "@/components/transaction-form";
+import { TransferPairs } from "@/components/transfer-pairs";
 import { formatMonthLabel, monthFromParam } from "@/lib/dates";
-import { listAccounts, listCategories, listRules, listTransactions } from "@/lib/queries";
+import { listAccounts, listCategories, listRules, listTransactions, listTransferPairs } from "@/lib/queries";
 import { matchRule } from "@/lib/rules";
 
 function param(value: string | string[] | undefined) {
@@ -24,6 +26,7 @@ export default async function TransactionsPage({ searchParams }: PageProps<"/tra
   const categories = listCategories();
   const rows = listTransactions({ month, accountId: accountParam, categoryId: categoryParam });
   const rules = listRules();
+  const transferPairs = listTransferPairs();
 
   const budgetRows = rows.filter((tx) => !tx.isTransfer);
   const inCents = budgetRows.filter((tx) => tx.amountCents > 0).reduce((sum, tx) => sum + tx.amountCents, 0);
@@ -46,6 +49,8 @@ export default async function TransactionsPage({ searchParams }: PageProps<"/tra
           <TransactionForm accounts={accounts} categories={categories} />
         </div>
       </details>
+
+      <TransferPairs pairs={transferPairs} />
 
       <section className="card p-5">
         <form method="get" className="flex flex-wrap items-end gap-3">
@@ -92,64 +97,72 @@ export default async function TransactionsPage({ searchParams }: PageProps<"/tra
             {filtered ? "No transactions match these filters." : `No transactions in ${monthLabel}.`}
           </p>
         ) : (
-          <div className="table-wrap mt-4">
-            <table className="data">
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>Payee</th>
-                  <th>Account</th>
-                  <th>Category</th>
-                  <th className="text-right">Amount</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((tx) => (
-                  <tr key={tx.id} className={tx.isTransfer ? "text-muted" : ""}>
-                    <td className="whitespace-nowrap text-muted">{tx.date}</td>
-                    <td>
-                      <div>{tx.payee || tx.rawDescription || "—"}</div>
-                      {tx.payee && tx.rawDescription && tx.rawDescription !== tx.payee && (
-                        <div className="text-xs text-muted">{tx.rawDescription}</div>
-                      )}
-                    </td>
-                    <td className="whitespace-nowrap text-muted">{tx.accountName}</td>
-                    <td>
-                      <CategorySelect
-                        key={`${tx.id}-${tx.categoryId}`}
-                        transactionId={tx.id}
-                        categoryId={tx.categoryId}
-                        isTransfer={tx.isTransfer}
-                        categories={categories}
-                      />
-                    </td>
-                    <td className="whitespace-nowrap text-right">
-                      <Money cents={tx.amountCents} signed className={tx.amountCents > 0 && !tx.isTransfer ? "text-ok" : ""} />
-                    </td>
-                    <td>
-                      <TransactionButtons
-                        id={tx.id}
-                        isTransfer={tx.isTransfer}
-                        canMakeRule={
-                          !tx.isTransfer &&
-                          tx.categoryId !== null &&
-                          // A rule only matches money moving the way its category expects.
-                          (tx.categoryKind === "expense" ? tx.amountCents < 0 : tx.amountCents > 0) &&
-                          (tx.payee || tx.rawDescription).trim().length >= 2 &&
-                          !matchRule(rules, {
-                            payee: tx.payee,
-                            description: tx.rawDescription,
-                            amountCents: tx.amountCents,
-                          })
-                        }
-                      />
-                    </td>
+          <BulkSelection ids={rows.map((tx) => tx.id)} categories={categories}>
+            <div className="table-wrap mt-4">
+              <table className="data">
+                <thead>
+                  <tr>
+                    <th className="w-8">
+                      <SelectAllCheckbox />
+                    </th>
+                    <th>Date</th>
+                    <th>Payee</th>
+                    <th>Account</th>
+                    <th>Category</th>
+                    <th className="text-right">Amount</th>
+                    <th />
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {rows.map((tx) => (
+                    <tr key={tx.id} className={tx.isTransfer ? "text-muted" : ""}>
+                      <td>
+                        <RowCheckbox id={tx.id} label={`${tx.date} ${tx.payee || tx.rawDescription}`} />
+                      </td>
+                      <td className="whitespace-nowrap text-muted">{tx.date}</td>
+                      <td>
+                        <div>{tx.payee || tx.rawDescription || "—"}</div>
+                        {tx.payee && tx.rawDescription && tx.rawDescription !== tx.payee && (
+                          <div className="text-xs text-muted">{tx.rawDescription}</div>
+                        )}
+                      </td>
+                      <td className="whitespace-nowrap text-muted">{tx.accountName}</td>
+                      <td>
+                        <CategorySelect
+                          key={`${tx.id}-${tx.categoryId}`}
+                          transactionId={tx.id}
+                          categoryId={tx.categoryId}
+                          isTransfer={tx.isTransfer}
+                          categories={categories}
+                        />
+                      </td>
+                      <td className="whitespace-nowrap text-right">
+                        <Money cents={tx.amountCents} signed className={tx.amountCents > 0 && !tx.isTransfer ? "text-ok" : ""} />
+                      </td>
+                      <td>
+                        <TransactionButtons
+                          id={tx.id}
+                          isTransfer={tx.isTransfer}
+                          canMakeRule={
+                            !tx.isTransfer &&
+                            tx.categoryId !== null &&
+                            // A rule only matches money moving the way its category expects.
+                            (tx.categoryKind === "expense" ? tx.amountCents < 0 : tx.amountCents > 0) &&
+                            (tx.payee || tx.rawDescription).trim().length >= 2 &&
+                            !matchRule(rules, {
+                              payee: tx.payee,
+                              description: tx.rawDescription,
+                              amountCents: tx.amountCents,
+                            })
+                          }
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </BulkSelection>
         )}
       </section>
     </div>

@@ -3,7 +3,13 @@ import { Suspense } from "react";
 import { Money } from "@/components/money";
 import { MonthPicker } from "@/components/month-picker";
 import { formatMonthLabel, monthFromParam } from "@/lib/dates";
-import { listAccounts, listTransactions, monthDashboard, type CategoryBudgetRow } from "@/lib/queries";
+import {
+  listAccounts,
+  listTransactions,
+  listTransferPairs,
+  monthDashboard,
+  type CategoryBudgetRow,
+} from "@/lib/queries";
 
 export default async function DashboardPage({ searchParams }: PageProps<"/">) {
   const { month: monthParam } = await searchParams;
@@ -22,6 +28,7 @@ export default async function DashboardPage({ searchParams }: PageProps<"/">) {
   }
 
   const data = monthDashboard(month);
+  const transferPairCount = listTransferPairs().length;
   const recent = listTransactions({ month }).slice(0, 8);
   const monthLabel = formatMonthLabel(month);
 
@@ -58,7 +65,7 @@ export default async function DashboardPage({ searchParams }: PageProps<"/">) {
         </Stat>
       </div>
 
-      {(data.overBudget.length > 0 || data.uncategorizedCount > 0) && (
+      {(data.overBudget.length > 0 || data.uncategorizedCount > 0 || transferPairCount > 0) && (
         <div className="flex flex-col gap-2">
           {data.overBudget.length > 0 && (
             <p className="rounded-xl border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger">
@@ -74,6 +81,19 @@ export default async function DashboardPage({ searchParams }: PageProps<"/">) {
                 className="font-semibold text-accent underline-offset-2 hover:underline"
               >
                 Categorize them
+              </Link>
+            </p>
+          )}
+          {transferPairCount > 0 && (
+            <p className="rounded-xl border border-line bg-card px-4 py-3 text-sm">
+              {transferPairCount} possible transfer{transferPairCount === 1 ? "" : "s"} between your accounts
+              {transferPairCount === 1 ? " isn't" : " aren't"} marked yet, so {transferPairCount === 1 ? "it counts" : "they count"} as
+              income and spending.{" "}
+              <Link
+                href={`/transactions?month=${month}#transfers`}
+                className="font-semibold text-accent underline-offset-2 hover:underline"
+              >
+                Review them
               </Link>
             </p>
           )}
