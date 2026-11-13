@@ -1,4 +1,4 @@
-import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export const accountTypes = ["checking", "savings", "credit"] as const;
 export const dataSources = ["manual", "csv", "plaid"] as const;
@@ -81,6 +81,22 @@ export const categorySuggestions = sqliteTable("category_suggestions", {
   model: text("model").notNull(),
   createdAt: text("created_at").notNull(),
 });
+
+// A suggested transfer pair you said isn't one, so it isn't suggested again.
+export const transferDismissals = sqliteTable(
+  "transfer_dismissals",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    outTransactionId: integer("out_transaction_id")
+      .notNull()
+      .references(() => transactions.id, { onDelete: "cascade" }),
+    inTransactionId: integer("in_transaction_id")
+      .notNull()
+      .references(() => transactions.id, { onDelete: "cascade" }),
+    createdAt: text("created_at").notNull(),
+  },
+  (table) => [uniqueIndex("idx_transfer_dismissals_pair").on(table.outTransactionId, table.inTransactionId)],
+);
 
 export type Account = typeof accounts.$inferSelect;
 export type Category = typeof categories.$inferSelect;

@@ -12,6 +12,7 @@ import {
   categorySuggestions,
   importBatches,
   transactions,
+  transferDismissals,
 } from "@/db/schema";
 import type { ActionState } from "@/lib/action-state";
 import { categorizeChunk, chunkMerchants } from "@/lib/ai/categorize";
@@ -315,6 +316,130 @@ export async function deleteTransaction(formData: FormData) {
   const id = parseId(formData.get("id"));
   if (!id) return;
   db.delete(transactions).where(eq(transactions.id, id)).run();
+  revalidateAll();
+}
+
+function plural(count: number, noun: string) {
+  return `${count} ${noun}${count === 1 ? "" : "s"}`;
+}
+
+// Most transactions one bulk action takes; well above a month's worth.
+const MAX_BULK = 5_000;
+
+// One action for every bulk change on the transactions table. The clicked button
+// says which change (`op`); `ids` are the selected transactions.
+export async function bulkUpdateTransactions(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const ids = [
+    ...new Set(formData.getAll("ids").map(parseId).filter((id): id is number => id !== null)),
+  ];
+  if (ids.length === 0) return { error: "Select at least one transaction." };
+  if (ids.length > MAX_BULK) return { error: `Select at most ${MAX_BULK.toLocaleString("en-US")} transactions at a time.` };
+  const op = formString(formData, "op");
+  const selected = inArray(transactions.id, ids);
+
+  if (op === "category") {
+    const categoryRaw = formString(formData, "categoryId");
+    let categoryId: number | null = null;
+    if (categoryRaw) {
+      categoryId = parseId(categoryRaw);
+      const category = categoryId ? findCategory(categoryId) : undefined;
+      if (!categoryId || !category || category.archived) return { error: "That category no longer exists." };
+    }
+    // Transfers don't take a category; they're left as they are.
+    const changed = db
+      .update(transactions)
+      .set({ categoryId })
+      .where(and(selected, eq(transactions.isTransfer, false)))
+      .run().changes;
+    const skipped = ids.length - changed;
+    revalidateAll();
+    const verb = categoryId === null ? "Cleared the category on" : "Categorized";
+    return {
+      message: `${verb} ${plural(changed, "transaction")}.${skipped > 0 ? ` Skipped ${plural(skipped, "transfer")}.` : ""}`,
+    };
+  }
+  if (op === "transfer") {
+    const changed = db
+      .update(transactions)
+      .set({ isTransfer: true, categoryId: null })
+      .where(and(selected, eq(transactions.isTransfer, false)))
+      .run().changes;
+    revalidateAll();
+    return { message: `Marked ${plural(changed, "transaction")} as ${changed === 1 ? "a transfer" : "transfers"}.` };
+  }
+  if (op === "not-transfer") {
+    const changed = db
+      .update(transactions)
+      .set({ isTransfer: false })
+      .where(and(selected, eq(transactions.isTransfer, true)))
+      .run().changes;
+    revalidateAll();
+    return { message: `${plural(changed, "transaction")} no longer marked as ${changed === 1 ? "a transfer" : "transfers"}.` };
+  }
+  if (op === "delete") {
+    const changed = db.delete(transactions).where(selected).run().changes;
+    revalidateAll();
+    return { message: `Deleted ${plural(changed, "transaction")}.` };
+  }
+  return { error: "Pick what to do with the selected transactions." };
+}
+
+// Marks both sides of a pair as transfers, which also clears their categories.
+function markPair(outId: number, inId: number): boolean {
+  const rows = db.select().from(transactions).where(inArray(transactions.id, [outId, inId])).all();
+  const out = rows.find((row) => row.id === outId);
+  const inRow = rows.find((row) => row.id === inId);
+  if (
+    !out ||
+    !inRow ||
+    out.isTransfer ||
+    inRow.isTransfer ||
+    out.accountId === inRow.accountId ||
+    out.amountCents >= 0 ||
+    inRow.amountCents !== -out.amountCents
+  ) {
+    return false;
+  }
+  db.update(transactions)
+    .set({ isTransfer: true, categoryId: null })
+    .where(inArray(transactions.id, [outId, inId]))
+    .run();
+  return true;
+}
+
+export async function markTransferPair(formData: FormData) {
+  const outId = parseId(formData.get("outId"));
+  const inId = parseId(formData.get("inId"));
+  if (!outId || !inId) return;
+  if (markPair(outId, inId)) revalidateAll();
+}
+
+// Marks the pairs that were on screen (`pairs` as "outId-inId"), each checked again.
+export async function markTransferPairs(formData: FormData) {
+  const pairs = formData.getAll("pairs").map((value) => String(value).split("-").map((part) => parseId(part)));
+  db.transaction(() => {
+    for (const [outId, inId] of pairs) {
+      if (outId && inId) markPair(outId, inId);
+    }
+  });
+  revalidateAll();
+}
+
+// "These two aren't a transfer": stop suggesting this pair.
+export async function dismissTransferPair(formData: FormData) {
+  const outId = parseId(formData.get("outId"));
+  const inId = parseId(formData.get("inId"));
+  if (!outId || !inId) return;
+  const found = db
+    .select({ id: transactions.id })
+    .from(transactions)
+    .where(inArray(transactions.id, [outId, inId]))
+    .all();
+  if (found.length !== 2) return;
+  db.insert(transferDismissals)
+    .values({ outTransactionId: outId, inTransactionId: inId, createdAt: new Date().toISOString() })
+    .onConflictDoNothing()
+    .run();
   revalidateAll();
 }
 

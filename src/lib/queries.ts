@@ -7,11 +7,13 @@ import {
   categorySuggestions,
   importBatches,
   transactions,
+  transferDismissals,
   type Account,
 } from "@/db/schema";
 import type { CategoryKind, UncategorizedRow } from "@/lib/ai/merchants";
 import { textMatches, type Rule } from "@/lib/rules";
 import { currentMonth, lastNMonths, monthBounds, shiftMonth } from "@/lib/dates";
+import { findTransferPairs, pairKey, type TransferMatch } from "@/lib/transfers";
 
 export function listAccounts() {
   return db.select().from(accounts).orderBy(asc(accounts.name)).all();
@@ -428,4 +430,45 @@ export function countUncategorized(): number {
     .where(and(isNull(transactions.categoryId), eq(transactions.isTransfer, false)))
     .all();
   return value;
+}
+
+export type TransferSide = {
+  id: number;
+  accountId: number;
+  accountName: string;
+  date: string;
+  amountCents: number;
+  payee: string;
+  rawDescription: string;
+  categoryId: number | null;
+  categoryName: string | null;
+};
+
+// Likely transfers between your own accounts that aren't marked as transfers yet.
+export function listTransferPairs(): TransferMatch<TransferSide>[] {
+  const rows = db
+    .select({
+      id: transactions.id,
+      accountId: transactions.accountId,
+      accountName: accounts.name,
+      date: transactions.date,
+      amountCents: transactions.amountCents,
+      payee: transactions.payee,
+      rawDescription: transactions.rawDescription,
+      categoryId: transactions.categoryId,
+      categoryName: categories.name,
+    })
+    .from(transactions)
+    .innerJoin(accounts, eq(transactions.accountId, accounts.id))
+    .leftJoin(categories, eq(transactions.categoryId, categories.id))
+    .where(eq(transactions.isTransfer, false))
+    .all();
+  const dismissed = new Set(
+    db
+      .select({ outId: transferDismissals.outTransactionId, inId: transferDismissals.inTransactionId })
+      .from(transferDismissals)
+      .all()
+      .map((row) => pairKey(row.outId, row.inId)),
+  );
+  return findTransferPairs(rows, dismissed);
 }

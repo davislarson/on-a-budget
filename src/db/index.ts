@@ -76,6 +76,16 @@ CREATE TABLE IF NOT EXISTS category_suggestions (
   created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS transfer_dismissals (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  out_transaction_id INTEGER NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+  in_transaction_id INTEGER NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+  created_at TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_transfer_dismissals_pair
+  ON transfer_dismissals(out_transaction_id, in_transaction_id);
+CREATE INDEX IF NOT EXISTS idx_transfer_dismissals_in ON transfer_dismissals(in_transaction_id);
 CREATE INDEX IF NOT EXISTS idx_suggestions_merchant ON category_suggestions(merchant_key);
 CREATE INDEX IF NOT EXISTS idx_transactions_date ON transactions(date);
 CREATE INDEX IF NOT EXISTS idx_transactions_account ON transactions(account_id);
